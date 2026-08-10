@@ -8,6 +8,7 @@ import { ResultScreen } from "./src/screens/ResultScreen";
 import HistoryScreen from "./src/screens/HistoryScreen";
 import AboutScreen from "./src/screens/AboutScreen";
 import type { ScanResult } from "./src/types";
+import { ScanHistoryProvider } from "./src/hooks/useScanHistory";
 
 export type RootStackParamList = {
   Scan: undefined;
@@ -25,16 +26,18 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 
 export default function App() {
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Scan" component={TabNavigator} />
-        <Stack.Screen
-          name="Result"
-          component={ResultScreen}
-          options={{ headerShown: true, title: "Diagnosis", presentation: "modal" }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ScanHistoryProvider>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Scan" component={TabNavigator} />
+          <Stack.Screen
+            name="Result"
+            component={ResultScreen}
+            options={{ headerShown: true, title: "Diagnosis", presentation: "modal" }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ScanHistoryProvider>
   );
 }
 

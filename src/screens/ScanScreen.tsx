@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  AppState,
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useIsFocused } from "@react-navigation/native";
 import {
   Camera,
   useCameraDevice,
@@ -24,6 +26,7 @@ import { useScanHistory } from "@/hooks/useScanHistory";
 import { jpegToModelInput, runModelPrediction } from "@/lib/imageInference";
 import { cropFromLabel, humanizeLabel } from "@/lib/labels";
 import { centeredSquareCrop } from "@/lib/imageGeometry";
+import { shouldActivateCamera } from "@/lib/cameraLifecycle";
 import {
   getResultSafetyStatus,
   hasAmbiguousMargin,
@@ -31,7 +34,8 @@ import {
 } from "@/lib/resultSafety";
 
 export function ScanScreen({ navigation }: { navigation: any }) {
-  const { hasPermission, requestPermission } = useCameraPermission();
+  const { hasPermission, canRequestPermission, requestPermission } = useCameraPermission();
+  const isFocused = useIsFocused();
   const device = useCameraDevice("back");
   const photoOutput = usePhotoOutput({
     containerFormat: "jpeg",
@@ -40,36 +44,45 @@ export function ScanScreen({ navigation }: { navigation: any }) {
   });
   const cameraOutputs = useMemo(() => [photoOutput], [photoOutput]);
 
-  const diseaseModel = useDiseaseModel();
+  const [modelRetryKey, setModelRetryKey] = useState(0);
+  const diseaseModel = useDiseaseModel(modelRetryKey);
 
   const [busy, setBusy] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [appState, setAppState] = useState(AppState.currentState);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { addScan } = useScanHistory();
 
   useEffect(() => {
-    if (!hasPermission) void requestPermission();
-  }, [hasPermission, requestPermission]);
+    const subscription = AppState.addEventListener("change", setAppState);
+    return () => subscription.remove();
+  }, []);
 
   const modelsReady = diseaseModel.state === "loaded";
+  const cameraIsActive = shouldActivateCamera(isFocused, appState, busy);
 
   const saveAndOpenResult = useCallback(
     async (result: ScanResult) => {
       const safetyStatus = getResultSafetyStatus(result);
       const hasPossibleMatch = safetyStatus === "possible-match";
-      await addScan({
-        diagnosis: hasPossibleMatch
-          ? `Possible ${humanizeLabel(result.topPrediction.label)}`
-          : safetyStatus === "uncertain"
-            ? "Uncertain scan"
-            : "Unsupported scan",
-        confidence: result.topPrediction.confidence,
-        type: hasPossibleMatch ? "disease" : "unknown",
-        imageUri: result.imageUri,
-        crop: hasPossibleMatch ? cropFromLabel(result.topPrediction.label) : undefined,
-        classId: result.topPrediction.classId,
-        isAmbiguous: !hasPossibleMatch,
-      });
+      try {
+        await addScan({
+          diagnosis: hasPossibleMatch
+            ? `Possible ${humanizeLabel(result.topPrediction.label)}`
+            : safetyStatus === "uncertain"
+              ? "Uncertain scan"
+              : "Unsupported scan",
+          confidence: result.topPrediction.confidence,
+          type: hasPossibleMatch ? "disease" : "unknown",
+          imageUri: result.imageUri,
+          crop: hasPossibleMatch ? cropFromLabel(result.topPrediction.label) : undefined,
+          classId: result.topPrediction.classId,
+          isAmbiguous: !hasPossibleMatch,
+          result,
+        });
+      } catch (historyError) {
+        console.error("Failed to save this scan to history:", historyError);
+      }
       navigation.navigate("Result", { result });
     },
     [addScan, navigation]
@@ -163,6 +176,10 @@ export function ScanScreen({ navigation }: { navigation: any }) {
 
   const handlePickFromGallery = useCallback(async () => {
     if (busy) return;
+    if (diseaseModel.state !== "loaded") {
+      setErrorMessage("The offline model is not ready yet. Try again in a moment.");
+      return;
+    }
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -192,7 +209,26 @@ export function ScanScreen({ navigation }: { navigation: any }) {
   }, [
     busy,
     analyzeAndOpenResult,
+    diseaseModel.state,
   ]);
+
+  if (diseaseModel.state === "error") {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.icon}>!</Text>
+        <Text style={styles.title}>The offline model did not load</Text>
+        <Text style={styles.permissionText}>
+          Scanning is unavailable until the bundled disease model is ready. No photo was uploaded.
+        </Text>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => setModelRetryKey((key) => key + 1)}
+        >
+          <Text style={styles.primaryButtonText}>Try loading again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (!hasPermission) {
     return (
@@ -202,29 +238,54 @@ export function ScanScreen({ navigation }: { navigation: any }) {
         <Text style={styles.permissionText}>
           LeafScan processes photos on this device. Camera access is only used for scanning.
         </Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
-          <Text style={styles.primaryButtonText}>Allow camera</Text>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => {
+            if (canRequestPermission) {
+              void requestPermission();
+            } else {
+              void Linking.openSettings();
+            }
+          }}
+        >
+          <Text style={styles.primaryButtonText}>
+            {canRequestPermission ? "Allow camera" : "Open device settings"}
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryButton} onPress={handlePickFromGallery}>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={handlePickFromGallery}
+          disabled={!modelsReady}
+        >
           <Text style={styles.secondaryButtonText}>Choose from gallery</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  if (device == null || !modelsReady) {
+  if (!modelsReady) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#4C7A3D" />
-        <Text style={styles.title}>{device == null ? "Preparing camera…" : "Loading offline models…"}</Text>
+        <Text style={styles.title}>Loading offline model…</Text>
         <Text style={styles.permissionText}>
           The first startup can take a moment. Your photos never leave the device.
         </Text>
-        {modelsReady && (
-          <TouchableOpacity style={styles.secondaryButton} onPress={handlePickFromGallery}>
-            <Text style={styles.secondaryButtonText}>Choose from gallery</Text>
-          </TouchableOpacity>
-        )}
+      </View>
+    );
+  }
+
+  if (device == null) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.icon}>⌁</Text>
+        <Text style={styles.title}>No back camera was found</Text>
+        <Text style={styles.permissionText}>
+          You can still analyze an existing, well-lit photo of one affected leaf.
+        </Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={handlePickFromGallery}>
+          <Text style={styles.primaryButtonText}>Choose from gallery</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -234,7 +295,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
       <Camera
         style={StyleSheet.absoluteFill}
         device={device}
-        isActive={!busy}
+        isActive={cameraIsActive}
         outputs={cameraOutputs}
         onStarted={() => setCameraReady(true)}
         onStopped={() => setCameraReady(false)}

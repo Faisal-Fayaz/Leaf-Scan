@@ -11,21 +11,44 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useScanHistory, ScanHistoryItem } from "@/hooks/useScanHistory";
+import { getTreatment } from "@/data/treatments";
 import { humanizeLabel } from "@/lib/labels";
+import { hasAmbiguousMargin, isPredictionUncertain } from "@/lib/resultSafety";
 
 export default function HistoryScreen() {
-  const { history, loading, clearHistory } = useScanHistory();
+  const { history, loading, error, clearHistory, reloadHistory } = useScanHistory();
   const navigation = useNavigation() as any;
 
   const confirmClear = () => {
     Alert.alert(
       "Clear scan history?",
-      "This removes saved scan summaries from this device. It cannot be undone.",
+      "This removes saved scan summaries and their copied images from this device. It cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Clear", style: "destructive", onPress: () => void clearHistory() },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            void clearHistory().catch(() => {
+              Alert.alert("History was not cleared", "Please try again.");
+            });
+          },
+        },
       ]
     );
+  };
+
+  const openHistoryItem = (item: ScanHistoryItem) => {
+    if (!item.result) return;
+    const prediction = item.result.topPrediction;
+    const refreshedResult = {
+      ...item.result,
+      treatment: prediction.mode === "disease" ? getTreatment(prediction.classId) : null,
+      isLowConfidence: isPredictionUncertain(prediction),
+      isAmbiguous: hasAmbiguousMargin(prediction),
+    };
+    const parentNavigation = navigation.getParent?.() ?? navigation;
+    parentNavigation.navigate("Result", { result: refreshedResult });
   };
 
   if (loading) {
@@ -50,6 +73,18 @@ export default function HistoryScreen() {
         )}
       </View>
 
+      {error && (
+        <View style={styles.errorCard}>
+          <View style={styles.errorBody}>
+            <Text style={styles.errorTitle}>History is unavailable</Text>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+          <Pressable onPress={() => void reloadHistory()} hitSlop={8}>
+            <Text style={styles.retry}>Retry</Text>
+          </Pressable>
+        </View>
+      )}
+
       {history.length === 0 ? (
         <View style={styles.centered}>
           <Text style={styles.emptyIcon}>◌</Text>
@@ -64,7 +99,9 @@ export default function HistoryScreen() {
           data={history}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => <HistoryRow item={item} />}
+          renderItem={({ item }) => (
+            <HistoryRow item={item} onPress={() => openHistoryItem(item)} />
+          )}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
       )}
@@ -72,9 +109,19 @@ export default function HistoryScreen() {
   );
 }
 
-function HistoryRow({ item }: { item: ScanHistoryItem }) {
+function HistoryRow({ item, onPress }: { item: ScanHistoryItem; onPress: () => void }) {
   return (
-    <View style={styles.item}>
+    <Pressable
+      style={({ pressed }) => [
+        styles.item,
+        pressed && item.result ? styles.itemPressed : undefined,
+        !item.result ? styles.itemUnavailable : undefined,
+      ]}
+      onPress={onPress}
+      disabled={!item.result}
+      accessibilityRole={item.result ? "button" : undefined}
+      accessibilityLabel={item.result ? `Review ${item.diagnosis}` : undefined}
+    >
       {item.imageUri ? (
         <Image source={{ uri: item.imageUri }} style={styles.thumbnail} />
       ) : (
@@ -90,8 +137,9 @@ function HistoryRow({ item }: { item: ScanHistoryItem }) {
         {item.isAmbiguous && <Text style={styles.warning}>Needs confirmation</Text>}
         <Text style={styles.date}>{new Date(item.timestamp).toLocaleString()}</Text>
         {item.crop && <Text style={styles.crop}>{item.crop}</Text>}
+        {item.result && <Text style={styles.review}>Tap to review</Text>}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -101,8 +149,15 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: "800", color: "#1F2A1A" },
   subtitle: { fontSize: 13, color: "#6B7A63", marginTop: 4 },
   clear: { color: "#9A3E2F", fontWeight: "800", paddingTop: 7 },
+  errorCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#FFF3EC", borderRadius: 14, padding: 13, marginBottom: 14 },
+  errorBody: { flex: 1, paddingRight: 10 },
+  errorTitle: { color: "#873B25", fontWeight: "800" },
+  errorText: { color: "#873B25", fontSize: 12, lineHeight: 17, marginTop: 2 },
+  retry: { color: "#873B25", fontWeight: "900" },
   listContent: { paddingBottom: 24 },
   item: { flexDirection: "row", backgroundColor: "#FFFFFF", padding: 12, borderRadius: 16 },
+  itemPressed: { opacity: 0.78, transform: [{ scale: 0.99 }] },
+  itemUnavailable: { opacity: 0.82 },
   thumbnail: { width: 74, height: 74, borderRadius: 12, backgroundColor: "#E6EEE1" },
   thumbnailPlaceholder: { width: 74, height: 74, borderRadius: 12, backgroundColor: "#E6EEE1" },
   itemBody: { flex: 1, marginLeft: 12, justifyContent: "center" },
@@ -111,6 +166,7 @@ const styles = StyleSheet.create({
   warning: { fontSize: 12, color: "#A35A1E", fontWeight: "700", marginTop: 3 },
   date: { fontSize: 11, color: "#7C8977", marginTop: 5 },
   crop: { fontSize: 12, color: "#6B7A63", marginTop: 2 },
+  review: { fontSize: 12, color: "#4C7A3D", fontWeight: "800", marginTop: 5 },
   separator: { height: 10 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", padding: 28 },
   emptyIcon: { fontSize: 48, color: "#8CA883" },
