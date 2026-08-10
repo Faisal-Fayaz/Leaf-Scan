@@ -7,6 +7,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "build:android": "eas build -p android --profile preview",
+    "test": "node --import tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "doctor": "expo-doctor",
     "export:web": "expo export --platform web"
@@ -41,6 +42,7 @@
     "@babel/core": "^7.24.0",
     "@types/react": "~18.2.0",
     "babel-plugin-module-resolver": "^5.0.3",
+    "tsx": "^4.23.12",
     "typescript": "~5.3.0"
   },
   "private": true
