@@ -1,0 +1,32 @@
+export type ScanMode = "disease" | "pest";
+
+export interface Prediction {
+  classId: string;
+  label: string;
+  confidence: number; // 0-1
+  mode: ScanMode;
+}
+
+export type Severity = "info" | "moderate" | "urgent";
+
+export interface TreatmentInfo {
+  classId: string;
+  displayName: string;
+  crop?: string;
+  description: string;
+  organicTreatment: string[];
+  chemicalTreatment: string[];
+  severity: Severity;
+}
+
+export interface ScanResult {
+  imageUri: string;
+  topPrediction: Prediction;
+  alternativePredictions: Prediction[];
+  treatment: TreatmentInfo | null;
+  isLowConfidence: boolean;
+}
+
+// Confidence below this threshold triggers the "uncertain" state
+// instead of a false-confident wrong diagnosis.
+export const LOW_CONFIDENCE_THRESHOLD = 0.6;

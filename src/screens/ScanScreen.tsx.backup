@@ -1,0 +1,196 @@
+import React, { useRef, useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { Camera, useCameraDevice, useCameraPermission } from "react-native-vision-camera";
+import * as ImagePicker from "expo-image-picker";
+import { useDiseaseModel, usePestModel } from "@/hooks/useTFLiteModels";
+import { useLivePrediction } from "@/hooks/useLivePrediction";
+import { getTreatment } from "@/data/treatments";
+import { LOW_CONFIDENCE_THRESHOLD, ScanResult } from "@/types";
+import { useScanHistory } from "@/hooks/useScanHistory";
+
+export function ScanScreen({ navigation }: { navigation: any }) {
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const device = useCameraDevice("back");
+  const cameraRef = useRef<Camera>(null);
+
+  const diseaseModel = useDiseaseModel();
+  const pestModel = usePestModel();
+  const { frameProcessor, livePrediction } = useLivePrediction(
+    diseaseModel.model,
+    pestModel.model
+  );
+
+  const [capturing, setCapturing] = useState(false);
+  const { history, addToHistory } = useScanHistory();
+
+  React.useEffect(() => {
+    if (!hasPermission) requestPermission();
+  }, [hasPermission]);
+
+  const modelsReady = diseaseModel.state === "loaded" && pestModel.state === "loaded";
+
+  const handleCapture = async () => {
+    if (!cameraRef.current || !livePrediction) return;
+    setCapturing(true);
+    try {
+      const photo = await cameraRef.current.takePhoto({ flash: "off" });
+      const imageUri = `file://${photo.path}`;
+
+      const isLowConfidence = livePrediction.confidence < LOW_CONFIDENCE_THRESHOLD;
+      const treatment = getTreatment(livePrediction.classId);
+
+      const result: ScanResult = {
+        imageUri,
+        topPrediction: livePrediction,
+        alternativePredictions: [],
+        treatment,
+        isLowConfidence,
+      };
+
+      // Add to history
+      await addToHistory(result);
+
+      navigation.navigate("Result", { result });
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  const handlePickFromGallery = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+
+    if (pickerResult.canceled || !livePrediction) return;
+
+    // Note: for a picked gallery image (not a live camera frame), run the
+    // models once against that static image rather than reusing the last
+    // live frame prediction — see README "Static image inference" note.
+    const imageUri = pickerResult.assets[0].uri;
+    const isLowConfidence = livePrediction.confidence < LOW_CONFIDENCE_THRESHOLD;
+    const treatment = getTreatment(livePrediction.classId);
+
+    const result: ScanResult = {
+      imageUri,
+      topPrediction: livePrediction,
+      alternativePredictions: [],
+      treatment,
+      isLowConfidence,
+    };
+
+    // Add to history
+    await addToHistory(result);
+
+    navigation.navigate("Result", { result });
+  };
+
+  if (!hasPermission) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.permissionText}>Camera permission needed to scan crops</Text>
+        <TouchableOpacity style={styles.button} onPress={requestPermission}>
+          <Text style={styles.buttonText}>Grant permission</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (device == null || !modelsReady) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#4C7A3D" />
+        <Text style={styles.permissionText}>
+          {device == null ? "Loading camera..." : "Loading models..."}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Camera
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={true}
+        photo={true}
+        frameProcessor={frameProcessor}
+      />
+
+      {livePrediction && (
+        <View style={styles.overlay}>
+          <Text style={styles.overlayLabel}>{livePrediction.label.replace(/_/g, " ")}</Text>
+          <Text style={styles.overlayConfidence}>
+            {Math.round(livePrediction.confidence * 100)}% confidence
+          </Text>
+        </View>
+      )}
+
+      <View style={styles.controls}>
+        <TouchableOpacity style={styles.galleryButton} onPress={handlePickFromGallery}>
+          <Text style={styles.galleryButtonText}>Gallery</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.captureButton}
+          onPress={handleCapture}
+          disabled={capturing}
+        >
+          {capturing ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <View style={styles.captureInner} />
+          )}
+        </TouchableOpacity>
+
+        <View style={{ width: 70 }} />
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#000" },
+  centered: { flex: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: "#F4F7F1" },
+  permissionText: { fontSize: 15, color: "#3A4535", marginTop: 12, textAlign: "center" },
+  button: { marginTop: 16, backgroundColor: "#4C7A3D", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
+  buttonText: { color: "#FFFFFF", fontWeight: "600" },
+  overlay: {
+    position: "absolute",
+    top: 60,
+    alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  overlayLabel: { color: "#FFFFFF", fontSize: 16, fontWeight: "700", textTransform: "capitalize" },
+  overlayConfidence: { color: "#D7E4CE", fontSize: 12, marginTop: 2 },
+  controls: {
+    position: "absolute",
+    bottom: 40,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 30,
+  },
+  captureButton: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    borderWidth: 4,
+    borderColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  captureInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: "#FFFFFF" },
+  galleryButton: { width: 70, alignItems: "center" },
+  galleryButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "600" },
+});

@@ -1,25 +1,49 @@
 {
   "expo": {
-    "name": "leaf-scan",
+    "name": "LeafScan",
     "slug": "leaf-scan",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#F4F7F1"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "LeafScan needs camera access to scan crops.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.leafscan.app"
     },
     "android": {
+      "package": "com.leafscan.app",
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
+        "backgroundColor": "#F4F7F1"
+      }
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+    "plugins": [
+      "expo-camera",
+      "expo-image-picker",
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "LeafScan needs camera access to scan crops.",
+          "enableCodeScanner": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2bc96316-93cd-4b80-ab20-a905eb022b1b"
+      }
     }
   }
 }
