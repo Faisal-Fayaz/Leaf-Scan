@@ -54,7 +54,7 @@ export default function HistoryScreen() {
         <View style={styles.centered}>
           <Text style={styles.emptyIcon}>◌</Text>
           <Text style={styles.emptyTitle}>No scans yet</Text>
-          <Text style={styles.emptyText}>Your recent diagnoses will appear here.</Text>
+          <Text style={styles.emptyText}>Your recent scan results will appear here.</Text>
           <Pressable style={styles.primaryButton} onPress={() => navigation.navigate("Scan")}>
             <Text style={styles.primaryButtonText}>Start a scan</Text>
           </Pressable>
