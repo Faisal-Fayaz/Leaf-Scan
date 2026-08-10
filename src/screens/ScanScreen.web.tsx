@@ -1,79 +1,46 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { LinearGradient } from "expo-linear-gradient";
+import { StatusPill } from "@/components/StatusPill";
+import { useI18n } from "@/i18n";
+import { colors, radii, shadows, spacing } from "@/theme";
 
-/**
- * TensorFlow Lite and VisionCamera are native-only. Keeping a web-specific
- * entry point prevents those Nitro modules from being evaluated in browsers
- * and gives web visitors a useful, honest fallback instead of a startup crash.
- */
+/** Native camera and TensorFlow Lite modules are intentionally excluded from web. */
 export function ScanScreen() {
+  const { t } = useI18n();
   return (
-    <View style={styles.container}>
-      <View style={styles.mark} accessibilityElementsHidden>
-        <Text style={styles.markText}>L</Text>
+    <LinearGradient colors={[colors.canvas, "#E4F0E1"]} style={styles.container}>
+      <View style={styles.card}>
+        <View style={styles.mark} accessibilityElementsHidden>
+          <Ionicons name="scan-outline" size={32} color={colors.primaryDark} />
+        </View>
+        <StatusPill label={t("web.kicker")} icon="phone-portrait-outline" />
+        <Text style={styles.title}>{t("web.title")}</Text>
+        <Text style={styles.body}>{t("web.body")}</Text>
+        <View style={styles.notice} accessibilityRole="text">
+          <View style={styles.noticeIcon}>
+            <Ionicons name="information-circle-outline" size={23} color={colors.primary} />
+          </View>
+          <View style={styles.noticeCopy}>
+            <Text style={styles.noticeTitle}>{t("web.noticeTitle")}</Text>
+            <Text style={styles.noticeBody}>{t("web.noticeBody")}</Text>
+          </View>
+        </View>
       </View>
-      <Text style={styles.kicker}>LEAFSCAN MOBILE</Text>
-      <Text style={styles.title}>Scan leaves on your phone</Text>
-      <Text style={styles.body}>
-        On-device camera scanning is available in the Android and iOS app. The
-        model runs locally so the photo does not need to be uploaded.
-      </Text>
-      <View style={styles.notice} accessibilityRole="text">
-        <Text style={styles.noticeTitle}>Why scanning is unavailable here</Text>
-        <Text style={styles.noticeBody}>
-          This browser build does not load the native TensorFlow Lite or camera
-          modules. Use LeafScan on a supported mobile device for a scan.
-        </Text>
-      </View>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F4F7F1",
-    padding: 28,
-  },
-  mark: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2F6B3D",
-    marginBottom: 22,
-  },
-  markText: { color: "#FFFFFF", fontSize: 30, fontWeight: "900" },
-  kicker: { color: "#4C7A3D", fontSize: 12, fontWeight: "900", letterSpacing: 2 },
-  title: {
-    color: "#1F2A1A",
-    fontSize: 34,
-    lineHeight: 40,
-    fontWeight: "900",
-    marginTop: 8,
-    textAlign: "center",
-  },
-  body: {
-    maxWidth: 540,
-    color: "#52624D",
-    fontSize: 17,
-    lineHeight: 26,
-    marginTop: 14,
-    textAlign: "center",
-  },
-  notice: {
-    width: "100%",
-    maxWidth: 540,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 20,
-    marginTop: 28,
-    borderWidth: 1,
-    borderColor: "#DCE7D7",
-  },
-  noticeTitle: { color: "#2D3C28", fontSize: 16, fontWeight: "800" },
-  noticeBody: { color: "#52624D", fontSize: 14, lineHeight: 21, marginTop: 7 },
+  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl },
+  card: { width: "100%", maxWidth: 620, alignItems: "center", backgroundColor: colors.surface, borderRadius: 28, padding: 40, borderWidth: 1, borderColor: colors.border, ...shadows.floating },
+  mark: { width: 72, height: 72, borderRadius: 24, alignItems: "center", justifyContent: "center", backgroundColor: colors.lime, marginBottom: spacing.xl },
+  title: { color: colors.ink, fontSize: 36, lineHeight: 43, fontWeight: "900", marginTop: spacing.lg, textAlign: "center" },
+  body: { maxWidth: 520, color: colors.muted, fontSize: 17, lineHeight: 27, marginTop: spacing.md, textAlign: "center" },
+  notice: { width: "100%", flexDirection: "row", alignItems: "flex-start", backgroundColor: colors.surfaceTint, borderRadius: radii.lg, padding: spacing.lg, marginTop: spacing.xxl, borderWidth: 1, borderColor: colors.border },
+  noticeIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  noticeCopy: { flex: 1, marginLeft: spacing.md },
+  noticeTitle: { color: colors.ink, fontSize: 16, fontWeight: "900" },
+  noticeBody: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 5 },
 });

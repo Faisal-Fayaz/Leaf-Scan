@@ -26,17 +26,28 @@
         "android.permission.RECORD_AUDIO"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#F4F7F1"
+        "backgroundColor": "#173E2B",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       }
     },
     "plugins": [
       "expo-image-picker",
       [
+        "expo-localization",
+        {
+          "supportedLocales": [
+            "en",
+            "hi"
+          ]
+        }
+      ],
+      [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F4F7F1",
+          "backgroundColor": "#173E2B",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 160
+          "imageWidth": 220
         }
       ]
     ],

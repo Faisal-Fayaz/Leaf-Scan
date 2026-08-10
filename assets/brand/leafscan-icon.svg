@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="128" y1="80" x2="880" y2="944" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#24543A"/>
+      <stop offset="1" stop-color="#102D20"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="332" y1="248" x2="696" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B7DF8F"/>
+      <stop offset="1" stop-color="#67A95E"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <circle cx="808" cy="190" r="238" fill="#9ACB77" opacity="0.07"/>
+  <circle cx="175" cy="866" r="270" fill="#FFFFFF" opacity="0.035"/>
+  <path d="M512 188C690 246 790 405 736 574C685 733 511 826 312 744C280 553 353 345 512 188Z" fill="url(#leaf)"/>
+  <path d="M326 730C428 620 526 507 691 330" fill="none" stroke="#F7F3DF" stroke-width="34" stroke-linecap="round"/>
+  <path d="M442 600L390 480M532 504L617 508M393 653L344 589M592 442L650 450" fill="none" stroke="#F7F3DF" stroke-width="19" stroke-linecap="round" opacity="0.9"/>
+  <path d="M260 384V274H370M654 274H764V384M260 640V750H370M654 750H764V640" fill="none" stroke="#F7F3DF" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M236 515H788" stroke="#DDF2B7" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="512" cy="515" r="23" fill="#F7F3DF"/>
+</svg>
