@@ -1,19 +1,54 @@
-import { useTensorflowModel } from "react-native-fast-tflite";
+import { useEffect, useState } from "react";
+import {
+  loadTensorflowModel,
+  type TensorflowPlugin,
+} from "react-native-fast-tflite";
 import diseaseClasses from "@/data/disease_class_names.json";
-import pestClasses from "@/data/pest_class_names.json";
 
-export function useDiseaseModel() {
-  return useTensorflowModel(require("../../assets/models/disease_model.tflite"));
+// Metro needs a static require call to turn this native model into an asset ID.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const diseaseModelSource = require("../../assets/models/disease_model.tflite");
+
+const LOADING_MODEL: TensorflowPlugin = {
+  model: undefined,
+  state: "loading",
+};
+
+type KeyedModelState = {
+  retryKey: number;
+  modelState: TensorflowPlugin;
+};
+
+export function useDiseaseModel(retryKey = 0): TensorflowPlugin {
+  const [state, setState] = useState<KeyedModelState>({
+    retryKey,
+    modelState: LOADING_MODEL,
+  });
+
+  useEffect(() => {
+    let active = true;
+    void loadTensorflowModel(diseaseModelSource, [])
+      .then((model) => {
+        if (active) {
+          setState({ retryKey, modelState: { model, state: "loaded" } });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        const modelError = error instanceof Error ? error : new Error(String(error));
+        console.error("Failed to load the disease model:", modelError);
+        setState({
+          retryKey,
+          modelState: { model: undefined, state: "error", error: modelError },
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [retryKey]);
+
+  return state.retryKey === retryKey ? state.modelState : LOADING_MODEL;
 }
 
-export function usePestModel() {
-  return useTensorflowModel(require("../../assets/models/pest_model.tflite"));
-}
-
-export let diseaseClassNames: string[] = diseaseClasses;
-export let pestClassNames: string[] = pestClasses;
-
-export function setClassNames(disease: string[], pest: string[]) {
-  diseaseClassNames = disease;
-  pestClassNames = pest;
-}
+export const diseaseClassNames: string[] = diseaseClasses;

@@ -1,19 +1,32 @@
 # LeafScan
 
-LeafScan is an offline React Native/Expo app for crop disease and insect-image triage. Camera frames and gallery images are processed on-device with TensorFlow Lite models.
+LeafScan is an offline React Native/Expo app for crop-disease image triage. Camera frames and gallery images are processed on-device with TensorFlow Lite.
+
+> **Pre-release software:** LeafScan can surface a possible visual match, but it is not a definitive diagnosis or pesticide recommendation. Review the [model card](MODEL_CARD.md) before evaluating or distributing the app.
+
+## Product experience
+
+- Guided camera and gallery scanning with large, accessible controls and clear offline/privacy status.
+- Conservative result states that separate a possible visual match from an uncertain or unsupported scan.
+- A private field notebook with durable local images and reviewable past results.
+- English and Hindi navigation and safety prompts, selected from the About screen or the device locale.
+
+Agronomy guidance remains in its reviewed English source until qualified local-language review is complete. LeafScan does not machine-translate safety-critical treatment text.
 
 ## Current model scope
 
-The bundled disease model maps 38 PlantVillage-style classes. The bundled pest model maps 102 IP102-style classes, but its labels are numeric in this repository. This is not an “any plant” diagnostic system: unsupported species, nutrient stress, weather injury, mixed infections, and poor-quality images can all produce incorrect predictions.
+The active disease model maps 38 PlantVillage-style classes. An experimental 102-class pest model is retained in the repository, but the app deliberately does not run it because its labels are numeric and unverified. This is not an “any plant” diagnostic system: unsupported species, nutrient stress, weather injury, mixed infections, and poor-quality images can all produce incorrect predictions.
 
-The app intentionally shows a confirmation warning for low-confidence or ambiguous results. Treatment cards provide conservative first steps only; they do not replace a local agronomist or a pesticide label.
+The app rejects low-confidence or close results, records them as uncertain, and hides class-specific guidance. Accepted results are presented only as possible visual matches. Treatment cards provide conservative first steps; they do not replace a local agronomist or a pesticide label.
 
 ## Development setup
 
+LeafScan targets Expo SDK 57, React Native 0.86, and Node.js 22.13 or newer.
+
 ~~~bash
-npm install
-npm run typecheck
-npm run doctor
+nvm use
+npm ci
+npm run validate
 npm start
 ~~~
 
@@ -26,11 +39,22 @@ npm run android
 npm run ios
 ~~~
 
+The browser export intentionally shows a mobile handoff rather than loading the native camera and TensorFlow Lite runtime. This keeps the web build usable without claiming that browser scans are supported.
+
 For an installable Android preview build:
 
 ~~~bash
 npm run build:android
 ~~~
+
+Every pull request runs the complete validation suite, checks dependency compatibility, exports Android and web bundles, and compiles an Android debug APK. See [CONTRIBUTING.md](CONTRIBUTING.md) for the change checklist.
+
+## Project policies
+
+- [Model capabilities and limitations](MODEL_CARD.md)
+- [Privacy notes](PRIVACY.md)
+- [Security policy](SECURITY.md)
+- [Contributing guide](CONTRIBUTING.md)
 
 ## Production checklist
 
@@ -40,7 +64,11 @@ Before publishing:
 2. Measure precision, recall, calibration, and out-of-distribution rejection on field images—not only the training split.
 3. Replace numeric pest labels with a versioned, verified taxonomy and locally reviewed treatment guidance.
 4. Add region/crop metadata and have agronomists review every recommendation.
-5. Add crash reporting, privacy/legal review, accessibility testing, localization, and an offline update strategy.
-6. Commit the source, model assets, and generated build configuration that your release process depends on.
+5. Complete physical-device accessibility testing, independent privacy/legal review, and a documented offline model-update strategy.
+6. Add privacy-conscious crash reporting only after defining consent, retention, and redaction requirements.
 
 No computer-vision model can reliably identify every plant disease from one photograph. The path to a farmer-grade product is a continuously evaluated, region-aware model and verified agronomy content—not simply a lower confidence threshold.
+
+## License
+
+LeafScan is available under the [MIT License](LICENSE). The bundled model's upstream license and training provenance are not yet documented; do not assume the app license grants separate model-distribution rights.

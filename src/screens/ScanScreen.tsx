@@ -1,61 +1,101 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  AppState,
+  Linking,
+  Platform,
+  Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
-import { Camera, useCameraDevice, useCameraPermission } from "react-native-vision-camera";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
+import { StatusBar } from "expo-status-bar";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useIsFocused } from "@react-navigation/native";
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  usePhotoOutput,
+} from "react-native-vision-camera";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
+import { File } from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
-import base64ArrayBuffer from "base64-arraybuffer";
-import { useDiseaseModel, usePestModel, diseaseClassNames, pestClassNames } from "@/hooks/useTFLiteModels";
-import { useLivePrediction } from "@/hooks/useLivePrediction";
-import { getTreatment } from "@/data/treatments";
-import { AMBIGUOUS_MARGIN_THRESHOLD, LOW_CONFIDENCE_THRESHOLD, ScanResult } from "@/types";
+import { decode as decodeBase64ArrayBuffer } from "base64-arraybuffer";
+import { AppButton } from "@/components/AppButton";
+import { StatusPill } from "@/components/StatusPill";
+import { useDiseaseModel, diseaseClassNames } from "@/hooks/useTFLiteModels";
 import { useScanHistory } from "@/hooks/useScanHistory";
+import { useI18n } from "@/i18n";
+import { getTreatment } from "@/data/treatments";
+import type { ScanResult } from "@/types";
 import { jpegToModelInput, runModelPrediction } from "@/lib/imageInference";
-import { selectBestPrediction } from "@/lib/prediction";
 import { cropFromLabel, humanizeLabel } from "@/lib/labels";
 import { centeredSquareCrop } from "@/lib/imageGeometry";
-import type { Prediction } from "@/types";
+import { shouldActivateCamera } from "@/lib/cameraLifecycle";
+import {
+  getResultSafetyStatus,
+  hasAmbiguousMargin,
+  isPredictionUncertain,
+} from "@/lib/resultSafety";
+import { colors, radii, shadows, spacing } from "@/theme";
 
 export function ScanScreen({ navigation }: { navigation: any }) {
-  const { hasPermission, requestPermission } = useCameraPermission();
+  const { t } = useI18n();
+  const { hasPermission, canRequestPermission, requestPermission } = useCameraPermission();
+  const isFocused = useIsFocused();
   const device = useCameraDevice("back");
-  const cameraRef = useRef<Camera>(null);
+  const photoOutput = usePhotoOutput({
+    containerFormat: "jpeg",
+    quality: 0.9,
+    qualityPrioritization: "balanced",
+  });
+  const cameraOutputs = useMemo(() => [photoOutput], [photoOutput]);
 
-  const diseaseModel = useDiseaseModel();
-  const pestModel = usePestModel();
-  const { frameProcessor, livePrediction } = useLivePrediction(
-    diseaseModel.model,
-    pestModel.model
-  );
-
+  const [modelRetryKey, setModelRetryKey] = useState(0);
+  const diseaseModel = useDiseaseModel(modelRetryKey);
   const [busy, setBusy] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [appState, setAppState] = useState(AppState.currentState);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { addScan } = useScanHistory();
 
   useEffect(() => {
-    if (!hasPermission) void requestPermission();
-  }, [hasPermission, requestPermission]);
+    const subscription = AppState.addEventListener("change", setAppState);
+    return () => subscription.remove();
+  }, []);
 
-  const modelsReady = diseaseModel.state === "loaded" && pestModel.state === "loaded";
+  const modelsReady = diseaseModel.state === "loaded";
+  const cameraIsActive = shouldActivateCamera(isFocused, appState, busy);
 
   const saveAndOpenResult = useCallback(
     async (result: ScanResult) => {
-      await addScan({
-        diagnosis: humanizeLabel(result.topPrediction.label),
-        confidence: result.topPrediction.confidence,
-        type: result.topPrediction.mode,
-        imageUri: result.imageUri,
-        crop: cropFromLabel(result.topPrediction.label),
-        classId: result.topPrediction.classId,
-        isAmbiguous: result.isAmbiguous,
-      });
+      const safetyStatus = getResultSafetyStatus(result);
+      const hasPossibleMatch = safetyStatus === "possible-match";
+      try {
+        await addScan({
+          diagnosis: hasPossibleMatch
+            ? `Possible ${humanizeLabel(result.topPrediction.label)}`
+            : safetyStatus === "uncertain"
+              ? "Uncertain scan"
+              : "Unsupported scan",
+          confidence: result.topPrediction.confidence,
+          type: hasPossibleMatch ? "disease" : "unknown",
+          imageUri: result.imageUri,
+          crop: hasPossibleMatch ? cropFromLabel(result.topPrediction.label) : undefined,
+          classId: result.topPrediction.classId,
+          isAmbiguous: !hasPossibleMatch,
+          result,
+        });
+      } catch (historyError) {
+        console.error("Failed to save this scan to history:", historyError);
+      }
+      if (Platform.OS !== "web") {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
       navigation.navigate("Result", { result });
     },
     [addScan, navigation]
@@ -68,13 +108,8 @@ export function ScanScreen({ navigation }: { navigation: any }) {
       height: number,
       source: "camera" | "gallery"
     ) => {
-      if (
-        diseaseModel.state !== "loaded" ||
-        !diseaseModel.model ||
-        pestModel.state !== "loaded" ||
-        !pestModel.model
-      ) {
-        throw new Error("The offline models are not ready");
+      if (diseaseModel.state !== "loaded" || !diseaseModel.model) {
+        throw new Error("The offline model is not ready");
       }
 
       let manipulatedUri: string | undefined;
@@ -94,83 +129,84 @@ export function ScanScreen({ navigation }: { navigation: any }) {
         manipulatedUri = manipulated.uri;
         if (!manipulated.base64) throw new Error("Image preprocessing returned no data");
 
-        const imageBuffer = base64ArrayBuffer.decode(manipulated.base64);
+        const imageBuffer = decodeBase64ArrayBuffer(manipulated.base64);
         const modelInput = jpegToModelInput(imageBuffer);
-        const diseasePrediction = runModelPrediction(
+        const prediction = runModelPrediction(
           diseaseModel.model,
           modelInput,
           diseaseClassNames,
           "disease"
         );
-        const pestPrediction = runModelPrediction(
-          pestModel.model,
-          modelInput,
-          pestClassNames,
-          "pest"
-        );
-        const selected = selectBestPrediction([diseasePrediction, pestPrediction]);
-        if (!selected.prediction) throw new Error("No model prediction was returned");
-
-        const prediction = selected.prediction;
-        const isLowConfidence =
-          prediction.confidence < LOW_CONFIDENCE_THRESHOLD ||
-          (prediction.margin ?? 1) < AMBIGUOUS_MARGIN_THRESHOLD ||
-          selected.ambiguous;
-        const alternatives = [diseasePrediction, pestPrediction].filter(
-          (candidate): candidate is Prediction =>
-            candidate !== null && candidate !== prediction
-        );
+        if (!prediction) throw new Error("No model prediction was returned");
 
         await saveAndOpenResult({
           imageUri,
           topPrediction: prediction,
-          alternativePredictions: alternatives,
+          alternativePredictions: [],
           treatment: getTreatment(prediction.classId),
-          isLowConfidence,
-          isAmbiguous: selected.ambiguous,
+          isLowConfidence: isPredictionUncertain(prediction),
+          isAmbiguous: hasAmbiguousMargin(prediction),
           source,
         });
       } finally {
         if (manipulatedUri) {
-          await FileSystem.deleteAsync(manipulatedUri, { idempotent: true }).catch(() => undefined);
+          try {
+            const temporaryFile = new File(manipulatedUri);
+            if (temporaryFile.exists) temporaryFile.delete();
+          } catch {
+            // Temporary inference images are also eligible for OS cache cleanup.
+          }
         }
       }
     },
-    [diseaseModel, pestModel, saveAndOpenResult]
+    [diseaseModel, saveAndOpenResult]
   );
 
   const handleCapture = useCallback(async () => {
-    if (!cameraRef.current || busy) return;
+    if (!cameraReady || busy) return;
 
     setBusy(true);
     setErrorMessage(null);
+    if (Platform.OS !== "web") {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    let photo: Awaited<ReturnType<typeof photoOutput.capturePhoto>> | undefined;
     try {
-      const photo = await cameraRef.current.takePhoto({ flash: "off" });
-      const imageUri = photo.path.startsWith("file://") ? photo.path : `file://${photo.path}`;
+      photo = await photoOutput.capturePhoto({ flashMode: "off" }, {});
+      const photoPath = await photo.saveToTemporaryFileAsync();
+      const imageUri = photoPath.startsWith("file://") ? photoPath : `file://${photoPath}`;
       await analyzeAndOpenResult(imageUri, photo.width, photo.height, "camera");
     } catch (error) {
       console.error("Camera capture failed:", error);
-      setErrorMessage("We could not capture this scan. Try again in better light.");
+      setErrorMessage(t("scan.captureError"));
+      if (Platform.OS !== "web") {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
     } finally {
+      photo?.dispose();
       setBusy(false);
     }
-  }, [analyzeAndOpenResult, busy]);
+  }, [analyzeAndOpenResult, busy, cameraReady, photoOutput, t]);
 
   const handlePickFromGallery = useCallback(async () => {
     if (busy) return;
+    if (diseaseModel.state !== "loaded") {
+      setErrorMessage(t("scan.cameraNotReady"));
+      return;
+    }
 
+    if (Platform.OS !== "web") void Haptics.selectionAsync();
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      setErrorMessage("Photo-library permission is needed to choose a leaf image.");
+      setErrorMessage(t("scan.libraryPermission"));
       return;
     }
 
     const pickerResult = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: "images",
       quality: 0.9,
       allowsEditing: false,
     });
-
     if (pickerResult.canceled || !pickerResult.assets[0]) return;
 
     setBusy(true);
@@ -180,132 +216,368 @@ export function ScanScreen({ navigation }: { navigation: any }) {
       await analyzeAndOpenResult(asset.uri, asset.width, asset.height, "gallery");
     } catch (error) {
       console.error("Gallery scan failed:", error);
-      setErrorMessage("This image could not be analyzed. Choose a clear, well-lit photo of one leaf.");
+      setErrorMessage(t("scan.galleryError"));
+      if (Platform.OS !== "web") {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
     } finally {
       setBusy(false);
     }
-  }, [
-    busy,
-    analyzeAndOpenResult,
-  ]);
+  }, [analyzeAndOpenResult, busy, diseaseModel.state, t]);
 
-  if (!hasPermission) {
+  if (diseaseModel.state === "error") {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.icon}>⌁</Text>
-        <Text style={styles.title}>Camera access is needed</Text>
-        <Text style={styles.permissionText}>
-          LeafScan processes photos on this device. Camera access is only used for scanning.
-        </Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
-          <Text style={styles.primaryButtonText}>Allow camera</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryButton} onPress={handlePickFromGallery}>
-          <Text style={styles.secondaryButtonText}>Choose from gallery</Text>
-        </TouchableOpacity>
-      </View>
+      <ScanStateScreen
+        icon="cloud-offline-outline"
+        title={t("scan.modelErrorTitle")}
+        body={t("scan.modelErrorBody")}
+      >
+        <AppButton
+          label={t("scan.modelRetry")}
+          icon="refresh"
+          onPress={() => setModelRetryKey((key) => key + 1)}
+          style={styles.stateButton}
+        />
+      </ScanStateScreen>
     );
   }
 
-  if (device == null || !modelsReady) {
+  if (!hasPermission) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#4C7A3D" />
-        <Text style={styles.title}>{device == null ? "Preparing camera…" : "Loading offline models…"}</Text>
-        <Text style={styles.permissionText}>
-          The first startup can take a moment. Your photos never leave the device.
-        </Text>
-        {modelsReady && (
-          <TouchableOpacity style={styles.secondaryButton} onPress={handlePickFromGallery}>
-            <Text style={styles.secondaryButtonText}>Choose from gallery</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      <ScanStateScreen
+        icon="camera-outline"
+        title={t("scan.permissionTitle")}
+        body={t("scan.permissionBody")}
+      >
+        <AppButton
+          label={canRequestPermission ? t("scan.allowCamera") : t("scan.openSettings")}
+          icon={canRequestPermission ? "camera" : "settings-outline"}
+          onPress={() => {
+            if (canRequestPermission) void requestPermission();
+            else void Linking.openSettings();
+          }}
+          style={styles.stateButton}
+        />
+        <AppButton
+          label={t("scan.chooseGallery")}
+          icon="images-outline"
+          variant="secondary"
+          disabled={!modelsReady}
+          onPress={handlePickFromGallery}
+          style={styles.stateButtonSecondary}
+        />
+      </ScanStateScreen>
+    );
+  }
+
+  if (!modelsReady) {
+    return (
+      <ScanStateScreen
+        icon="leaf-outline"
+        title={t("scan.modelLoadingTitle")}
+        body={t("scan.modelLoadingBody")}
+        loading
+      />
+    );
+  }
+
+  if (device == null) {
+    return (
+      <ScanStateScreen
+        icon="camera-reverse-outline"
+        title={t("scan.noCameraTitle")}
+        body={t("scan.noCameraBody")}
+      >
+        <AppButton
+          label={t("scan.chooseGallery")}
+          icon="images-outline"
+          onPress={handlePickFromGallery}
+          style={styles.stateButton}
+        />
+      </ScanStateScreen>
     );
   }
 
   return (
     <View style={styles.container}>
+      <StatusBar style="light" />
       <Camera
-        ref={cameraRef}
         style={StyleSheet.absoluteFill}
         device={device}
-        isActive={!busy}
-        photo={true}
-        frameProcessor={frameProcessor}
+        isActive={cameraIsActive}
+        outputs={cameraOutputs}
+        onStarted={() => setCameraReady(true)}
+        onStopped={() => setCameraReady(false)}
+        onError={(error) => {
+          console.error("Camera session failed:", error);
+          setCameraReady(false);
+          setErrorMessage(t("scan.cameraError"));
+        }}
+      />
+      <LinearGradient
+        colors={["rgba(7,18,12,0.82)", "rgba(7,18,12,0.05)", "rgba(7,18,12,0.92)"]}
+        locations={[0, 0.5, 1]}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
       />
 
-      <View style={styles.topHint}>
-        <Text style={styles.topHintTitle}>Frame one affected leaf</Text>
-        <Text style={styles.topHintText}>Use daylight and keep the leaf in focus</Text>
-      </View>
-
-      {livePrediction && (
-        <View style={styles.overlay}>
-          <Text style={styles.overlayEyebrow}>Live estimate</Text>
-          <Text style={styles.overlayLabel}>{humanizeLabel(livePrediction.label)}</Text>
-          <Text style={styles.overlayConfidence}>
-            {Math.round(livePrediction.confidence * 100)}% model score
-          </Text>
+      <SafeAreaView style={styles.overlay} edges={["top", "bottom"]}>
+        <View style={styles.cameraHeader}>
+          <View>
+            <Text style={styles.cameraBrand}>{t("app.name")}</Text>
+            <Text style={styles.cameraTitle}>{t("scan.frameTitle")}</Text>
+          </View>
+          <StatusPill label={t("scan.privateBadge")} icon="lock-closed" tone="dark" />
         </View>
-      )}
 
-      {errorMessage && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-          <TouchableOpacity onPress={() => setErrorMessage(null)}>
-            <Text style={styles.dismissText}>Dismiss</Text>
-          </TouchableOpacity>
+        <View style={styles.guideArea} pointerEvents="none">
+          <View style={styles.scanGuide}>
+            <GuideCorner position="topLeft" />
+            <GuideCorner position="topRight" />
+            <GuideCorner position="bottomLeft" />
+            <GuideCorner position="bottomRight" />
+            <View style={styles.guideLabel}>
+              <Ionicons name="leaf-outline" size={15} color={colors.white} />
+              <Text style={styles.guideLabelText}>{t("scan.frameHint")}</Text>
+            </View>
+          </View>
         </View>
-      )}
 
-      <View style={styles.controls}>
-        <TouchableOpacity style={styles.galleryButton} onPress={handlePickFromGallery} disabled={busy}>
-          <Text style={styles.galleryButtonIcon}>▧</Text>
-          <Text style={styles.galleryButtonText}>Gallery</Text>
-        </TouchableOpacity>
+        {errorMessage && (
+          <View style={styles.errorBanner} accessibilityRole="alert">
+            <Ionicons name="alert-circle" size={21} color={colors.danger} />
+            <Text style={styles.errorText}>{errorMessage}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("common.dismiss")}
+              hitSlop={8}
+              onPress={() => setErrorMessage(null)}
+            >
+              <Ionicons name="close" size={22} color={colors.danger} />
+            </Pressable>
+          </View>
+        )}
 
-        <TouchableOpacity style={styles.captureButton} onPress={handleCapture} disabled={busy}>
-          {busy ? <ActivityIndicator color="#FFFFFF" /> : <View style={styles.captureInner} />}
-        </TouchableOpacity>
+        <View style={styles.cameraPanel}>
+          <View style={styles.busyLine}>
+            {busy ? (
+              <>
+                <ActivityIndicator size="small" color={colors.lime} />
+                <Text style={styles.busyText}>{t("scan.analyzing")}</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="phone-portrait-outline" size={15} color={colors.lime} />
+                <Text style={styles.busyText}>{t("common.offline")}</Text>
+              </>
+            )}
+          </View>
 
-        <View style={styles.controlSpacer} />
-      </View>
+          <View style={styles.controls}>
+            <CameraSideButton
+              icon="images-outline"
+              label={t("common.gallery")}
+              accessibilityLabel={t("scan.galleryA11y")}
+              disabled={busy}
+              onPress={handlePickFromGallery}
+            />
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("scan.captureA11y")}
+              accessibilityState={{ disabled: busy || !cameraReady, busy }}
+              disabled={busy || !cameraReady}
+              onPress={handleCapture}
+              style={({ pressed }) => [
+                styles.captureButton,
+                pressed ? styles.capturePressed : undefined,
+                busy || !cameraReady ? styles.captureDisabled : undefined,
+              ]}
+            >
+              <View style={styles.captureInner}>
+                {busy ? (
+                  <ActivityIndicator color={colors.primaryDark} />
+                ) : (
+                  <Ionicons name="leaf" size={27} color={colors.primaryDark} />
+                )}
+              </View>
+            </Pressable>
+
+            <View style={styles.sidePlaceholder}>
+              <View style={styles.offlineDot} />
+              <Text style={styles.readyText}>{cameraReady ? t("scan.ready") : "…"}</Text>
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
     </View>
   );
 }
 
+function ScanStateScreen({
+  icon,
+  title,
+  body,
+  loading = false,
+  children,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  title: string;
+  body: string;
+  loading?: boolean;
+  children?: React.ReactNode;
+}) {
+  const { t } = useI18n();
+  return (
+    <LinearGradient colors={[colors.canvas, "#E5F1E1"]} style={styles.stateBackground}>
+      <StatusBar style="dark" />
+      <SafeAreaView style={styles.stateSafeArea}>
+        <StatusPill label={t("common.offline")} icon="cloud-offline-outline" />
+        <View style={styles.stateContent}>
+          <View style={styles.stateIconWrap}>
+            {loading ? (
+              <ActivityIndicator size="large" color={colors.primary} />
+            ) : (
+              <Ionicons name={icon} size={42} color={colors.primary} />
+            )}
+          </View>
+          <Text style={styles.stateTitle}>{title}</Text>
+          <Text style={styles.stateBody}>{body}</Text>
+          {children && <View style={styles.stateActions}>{children}</View>}
+        </View>
+        <View style={styles.privacyLine}>
+          <Ionicons name="lock-closed-outline" size={15} color={colors.muted} />
+          <Text style={styles.privacyText}>{t("scan.privateBadge")}</Text>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+}
+
+function GuideCorner({ position }: { position: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" }) {
+  return <View style={[styles.guideCorner, styles[position]]} />;
+}
+
+function CameraSideButton({
+  icon,
+  label,
+  accessibilityLabel,
+  disabled,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  accessibilityLabel: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.sideButton,
+        pressed ? styles.sideButtonPressed : undefined,
+        disabled ? styles.captureDisabled : undefined,
+      ]}
+    >
+      <View style={styles.sideButtonIcon}>
+        <Ionicons name={icon} size={23} color={colors.white} />
+      </View>
+      <Text style={styles.sideButtonLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#10150E" },
-  centered: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 28,
-    backgroundColor: "#F4F7F1",
+  container: { flex: 1, backgroundColor: colors.black },
+  overlay: { flex: 1, paddingHorizontal: spacing.xl },
+  cameraHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+    paddingTop: spacing.sm,
   },
-  icon: { fontSize: 42, color: "#4C7A3D", marginBottom: 8 },
-  title: { fontSize: 22, fontWeight: "800", color: "#1F2A1A", textAlign: "center", marginTop: 10 },
-  permissionText: { fontSize: 15, color: "#52624D", marginTop: 12, textAlign: "center", lineHeight: 22 },
-  primaryButton: { marginTop: 22, backgroundColor: "#4C7A3D", paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
-  primaryButtonText: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
-  secondaryButton: { marginTop: 12, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#B9C8B2" },
-  secondaryButtonText: { color: "#4C7A3D", fontWeight: "700" },
-  topHint: { position: "absolute", top: 48, alignSelf: "center", alignItems: "center" },
-  topHintTitle: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
-  topHintText: { color: "#D7E4CE", fontSize: 12, marginTop: 4 },
-  overlay: { position: "absolute", top: 104, alignSelf: "center", alignItems: "center", backgroundColor: "rgba(15,25,12,0.78)", paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16 },
-  overlayEyebrow: { color: "#BBD7AD", fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
-  overlayLabel: { color: "#FFFFFF", fontSize: 17, fontWeight: "800", marginTop: 2, textAlign: "center" },
-  overlayConfidence: { color: "#D7E4CE", fontSize: 12, marginTop: 3 },
-  errorBanner: { position: "absolute", top: 170, left: 18, right: 18, backgroundColor: "#FFF3EC", borderRadius: 14, padding: 13, flexDirection: "row", alignItems: "center", gap: 10 },
-  errorText: { color: "#873B25", flex: 1, lineHeight: 19 },
-  dismissText: { color: "#873B25", fontWeight: "800" },
-  controls: { position: "absolute", bottom: 38, left: 0, right: 0, flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 30 },
-  captureButton: { width: 78, height: 78, borderRadius: 39, backgroundColor: "rgba(255,255,255,0.22)", borderWidth: 4, borderColor: "#FFFFFF", justifyContent: "center", alignItems: "center" },
-  captureInner: { width: 61, height: 61, borderRadius: 31, backgroundColor: "#FFFFFF" },
-  galleryButton: { width: 72, alignItems: "center" },
-  galleryButtonIcon: { color: "#FFFFFF", fontSize: 25, lineHeight: 27 },
-  galleryButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", marginTop: 2 },
-  controlSpacer: { width: 72 },
+  cameraBrand: { color: colors.lime, fontSize: 12, fontWeight: "900", letterSpacing: 2 },
+  cameraTitle: { color: colors.white, fontSize: 20, lineHeight: 25, fontWeight: "900", marginTop: 4 },
+  guideArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: spacing.lg },
+  scanGuide: { width: "79%", maxWidth: 360, aspectRatio: 0.82, position: "relative" },
+  guideCorner: { position: "absolute", width: 42, height: 42, borderColor: colors.white },
+  topLeft: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 18 },
+  topRight: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 18 },
+  bottomLeft: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 18 },
+  bottomRight: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 18 },
+  guideLabel: {
+    position: "absolute",
+    bottom: 14,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    backgroundColor: colors.cameraOverlay,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  guideLabelText: { color: colors.white, fontSize: 11, fontWeight: "700" },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.dangerSurface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 11,
+    marginBottom: spacing.md,
+  },
+  errorText: { flex: 1, color: colors.danger, fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  cameraPanel: {
+    backgroundColor: colors.cameraPanel,
+    borderRadius: radii.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    ...shadows.floating,
+  },
+  busyLine: { minHeight: 22, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  busyText: { color: "#DCE9D8", fontSize: 12, fontWeight: "700" },
+  controls: { marginTop: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  captureButton: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    borderWidth: 3,
+    borderColor: colors.white,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  captureInner: { width: 66, height: 66, borderRadius: 33, backgroundColor: colors.white, alignItems: "center", justifyContent: "center" },
+  capturePressed: { transform: [{ scale: 0.94 }] },
+  captureDisabled: { opacity: 0.46 },
+  sideButton: { width: 72, alignItems: "center", gap: 5 },
+  sideButtonPressed: { opacity: 0.75, transform: [{ scale: 0.96 }] },
+  sideButtonIcon: { width: 48, height: 48, borderRadius: radii.md, backgroundColor: "rgba(255,255,255,0.14)", alignItems: "center", justifyContent: "center" },
+  sideButtonLabel: { color: colors.white, fontSize: 11, fontWeight: "800" },
+  sidePlaceholder: { width: 72, alignItems: "center", gap: 7 },
+  offlineDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.lime, marginTop: 10 },
+  readyText: { color: "#C9D7C5", fontSize: 9, fontWeight: "900", letterSpacing: 1 },
+  stateBackground: { flex: 1 },
+  stateSafeArea: { flex: 1, padding: spacing.xl },
+  stateContent: { flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: spacing.huge },
+  stateIconWrap: { width: 92, height: 92, borderRadius: 30, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center", ...shadows.card },
+  stateTitle: { maxWidth: 340, color: colors.ink, fontSize: 28, lineHeight: 34, fontWeight: "900", textAlign: "center", marginTop: spacing.xxl },
+  stateBody: { maxWidth: 370, color: colors.muted, fontSize: 15, lineHeight: 23, textAlign: "center", marginTop: spacing.md },
+  stateActions: { width: "100%", maxWidth: 380, marginTop: spacing.xxl },
+  stateButton: { width: "100%" },
+  stateButtonSecondary: { width: "100%", marginTop: spacing.md },
+  privacyLine: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingBottom: spacing.sm },
+  privacyText: { color: colors.muted, fontSize: 10, fontWeight: "900", letterSpacing: 1.2 },
 });

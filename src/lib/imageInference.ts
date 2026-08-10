@@ -47,6 +47,28 @@ export function runModelPrediction(
     );
   }
 
-  const outputs = model.runSync([input]);
-  return predictionFromOutputs(outputs, classNames, mode);
+  const outputs = model.runSync([input.buffer as ArrayBuffer]);
+  const typedOutputs = outputs.map((output, index) => {
+    switch (model.outputs[index]?.dataType) {
+      case "float32":
+        return new Float32Array(output);
+      case "float64":
+        return new Float64Array(output);
+      case "int8":
+        return new Int8Array(output);
+      case "int16":
+        return new Int16Array(output);
+      case "int32":
+        return new Int32Array(output);
+      case "uint8":
+        return new Uint8Array(output);
+      case "uint16":
+        return new Uint16Array(output);
+      case "uint32":
+        return new Uint32Array(output);
+      default:
+        return output;
+    }
+  });
+  return predictionFromOutputs(typedOutputs, classNames, mode);
 }

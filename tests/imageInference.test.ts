@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import jpeg from "jpeg-js";
-import { jpegToModelInput } from "../src/lib/imageInference";
+import type { TensorflowModel } from "react-native-fast-tflite";
+import { jpegToModelInput, runModelPrediction } from "../src/lib/imageInference";
 import { MODEL_INPUT_VALUE_COUNT } from "../src/lib/modelInput";
 
 function createJpeg(width: number, height: number): ArrayBuffer {
@@ -29,4 +30,23 @@ test("decodes a model-sized JPEG to float32 values in the 0-255 range", () => {
 
 test("rejects JPEGs that skipped square resize preprocessing", () => {
   assert.throws(() => jpegToModelInput(createJpeg(160, 120)), /Expected a 224x224 image/);
+});
+
+test("passes ArrayBuffers to Nitro TFLite and decodes its float output", () => {
+  const input = new Float32Array(MODEL_INPUT_VALUE_COUNT);
+  let receivedInput: ArrayBuffer | undefined;
+  const model = {
+    inputs: [{ name: "input", dataType: "float32", shape: [1, 224, 224, 3] }],
+    outputs: [{ name: "scores", dataType: "float32", shape: [1, 2] }],
+    runSync: (buffers: ArrayBuffer[]) => {
+      [receivedInput] = buffers;
+      return [new Float32Array([0.2, 0.8]).buffer];
+    },
+  } as unknown as TensorflowModel;
+
+  const prediction = runModelPrediction(model, input, ["healthy", "leaf_spot"], "disease");
+
+  assert.equal(receivedInput, input.buffer);
+  assert.equal(prediction?.label, "leaf_spot");
+  assert.ok(Math.abs((prediction?.confidence ?? 0) - 0.8) < 0.000001);
 });

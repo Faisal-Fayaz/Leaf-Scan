@@ -1,5 +1,5 @@
 export function humanizeLabel(label: string): string {
-  const [crop, condition] = label.split("___");
+  const [, condition] = label.split("___");
   const cleanCondition = (condition ?? label)
     .replace(/_/g, " ")
     .replace(/\s+/g, " ")

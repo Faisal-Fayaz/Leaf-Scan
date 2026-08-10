@@ -1,0 +1,64 @@
+name: Continuous integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPO_NO_TELEMETRY: "1"
+
+jobs:
+  quality:
+    name: Tests, types, config, and bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run validate
+      - run: npx expo install --check
+      - name: Export Android and web bundles
+        run: |
+          npx expo export --platform android --output-dir "$RUNNER_TEMP/leafscan-android"
+          npx expo export --platform web --output-dir "$RUNNER_TEMP/leafscan-web"
+      - name: Keep native modules out of the browser bundle
+        run: |
+          if grep -R -E "Native NitroModules are not available on web|TfliteModule|CameraFactory" "$RUNNER_TEMP/leafscan-web/_expo/static/js/web"; then
+            echo "A native-only camera or TensorFlow module leaked into the web bundle."
+            exit 1
+          fi
+
+  android-native:
+    name: Android native build
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: npm ci
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install
+      - name: Compile a debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
