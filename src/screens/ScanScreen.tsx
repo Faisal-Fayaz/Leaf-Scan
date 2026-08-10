@@ -17,9 +17,11 @@ import { useLivePrediction } from "@/hooks/useLivePrediction";
 import { getTreatment } from "@/data/treatments";
 import { AMBIGUOUS_MARGIN_THRESHOLD, LOW_CONFIDENCE_THRESHOLD, ScanResult } from "@/types";
 import { useScanHistory } from "@/hooks/useScanHistory";
-import { runStaticPrediction } from "@/lib/imageInference";
+import { jpegToModelInput, runModelPrediction } from "@/lib/imageInference";
 import { selectBestPrediction } from "@/lib/prediction";
 import { cropFromLabel, humanizeLabel } from "@/lib/labels";
+import { centeredSquareCrop } from "@/lib/imageGeometry";
+import type { Prediction } from "@/types";
 
 export function ScanScreen({ navigation }: { navigation: any }) {
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -59,65 +61,100 @@ export function ScanScreen({ navigation }: { navigation: any }) {
     [addScan, navigation]
   );
 
-  const getPredictionFromImageUri = useCallback(
+  const analyzeAndOpenResult = useCallback(
     async (
-      uri: string,
-      model: { model: any; state: string },
-      classNames: string[],
-      mode: "disease" | "pest"
+      imageUri: string,
+      width: number,
+      height: number,
+      source: "camera" | "gallery"
     ) => {
-      if (model.state !== "loaded" || !model.model) return null;
+      if (
+        diseaseModel.state !== "loaded" ||
+        !diseaseModel.model ||
+        pestModel.state !== "loaded" ||
+        !pestModel.model
+      ) {
+        throw new Error("The offline models are not ready");
+      }
 
       let manipulatedUri: string | undefined;
       try {
         const manipulated = await ImageManipulator.manipulateAsync(
-          uri,
-          [{ resize: { width: 224, height: 224 } }],
-          { format: ImageManipulator.SaveFormat.JPEG, compress: 0.92 }
+          imageUri,
+          [
+            { crop: centeredSquareCrop(width, height) },
+            { resize: { width: 224, height: 224 } },
+          ],
+          {
+            base64: true,
+            format: ImageManipulator.SaveFormat.JPEG,
+            compress: 0.92,
+          }
         );
         manipulatedUri = manipulated.uri;
+        if (!manipulated.base64) throw new Error("Image preprocessing returned no data");
 
-        const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-          encoding: FileSystem.EncodingType.Base64,
+        const imageBuffer = base64ArrayBuffer.decode(manipulated.base64);
+        const modelInput = jpegToModelInput(imageBuffer);
+        const diseasePrediction = runModelPrediction(
+          diseaseModel.model,
+          modelInput,
+          diseaseClassNames,
+          "disease"
+        );
+        const pestPrediction = runModelPrediction(
+          pestModel.model,
+          modelInput,
+          pestClassNames,
+          "pest"
+        );
+        const selected = selectBestPrediction([diseasePrediction, pestPrediction]);
+        if (!selected.prediction) throw new Error("No model prediction was returned");
+
+        const prediction = selected.prediction;
+        const isLowConfidence =
+          prediction.confidence < LOW_CONFIDENCE_THRESHOLD ||
+          (prediction.margin ?? 1) < AMBIGUOUS_MARGIN_THRESHOLD ||
+          selected.ambiguous;
+        const alternatives = [diseasePrediction, pestPrediction].filter(
+          (candidate): candidate is Prediction =>
+            candidate !== null && candidate !== prediction
+        );
+
+        await saveAndOpenResult({
+          imageUri,
+          topPrediction: prediction,
+          alternativePredictions: alternatives,
+          treatment: getTreatment(prediction.classId),
+          isLowConfidence,
+          isAmbiguous: selected.ambiguous,
+          source,
         });
-        const imageBuffer = base64ArrayBuffer.decode(base64);
-        return runStaticPrediction(model.model, imageBuffer, classNames, mode);
       } finally {
         if (manipulatedUri) {
           await FileSystem.deleteAsync(manipulatedUri, { idempotent: true }).catch(() => undefined);
         }
       }
     },
-    []
+    [diseaseModel, pestModel, saveAndOpenResult]
   );
 
   const handleCapture = useCallback(async () => {
-    if (!cameraRef.current || !livePrediction || busy) return;
+    if (!cameraRef.current || busy) return;
 
     setBusy(true);
     setErrorMessage(null);
     try {
       const photo = await cameraRef.current.takePhoto({ flash: "off" });
       const imageUri = photo.path.startsWith("file://") ? photo.path : `file://${photo.path}`;
-      const isLowConfidence =
-        livePrediction.confidence < LOW_CONFIDENCE_THRESHOLD ||
-        (livePrediction.margin ?? 1) < AMBIGUOUS_MARGIN_THRESHOLD;
-
-      await saveAndOpenResult({
-        imageUri,
-        topPrediction: livePrediction,
-        alternativePredictions: [],
-        treatment: getTreatment(livePrediction.classId),
-        isLowConfidence,
-        source: "camera",
-      });
+      await analyzeAndOpenResult(imageUri, photo.width, photo.height, "camera");
     } catch (error) {
       console.error("Camera capture failed:", error);
       setErrorMessage("We could not capture this scan. Try again in better light.");
     } finally {
       setBusy(false);
     }
-  }, [busy, livePrediction, saveAndOpenResult]);
+  }, [analyzeAndOpenResult, busy]);
 
   const handlePickFromGallery = useCallback(async () => {
     if (busy) return;
@@ -129,7 +166,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
     }
 
     const pickerResult = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.9,
       allowsEditing: false,
     });
@@ -139,31 +176,8 @@ export function ScanScreen({ navigation }: { navigation: any }) {
     setBusy(true);
     setErrorMessage(null);
     try {
-      const imageUri = pickerResult.assets[0].uri;
-      const [diseasePrediction, pestPrediction] = await Promise.all([
-        getPredictionFromImageUri(imageUri, diseaseModel, diseaseClassNames, "disease"),
-        getPredictionFromImageUri(imageUri, pestModel, pestClassNames, "pest"),
-      ]);
-      const selected = selectBestPrediction([diseasePrediction, pestPrediction]);
-      if (!selected.prediction) throw new Error("No model prediction was returned");
-
-      const prediction = selected.prediction;
-      const isLowConfidence =
-        prediction.confidence < LOW_CONFIDENCE_THRESHOLD ||
-        (prediction.margin ?? 1) < AMBIGUOUS_MARGIN_THRESHOLD ||
-        selected.ambiguous;
-
-      await saveAndOpenResult({
-        imageUri,
-        topPrediction: prediction,
-        alternativePredictions: [diseasePrediction, pestPrediction].filter(
-          (candidate) => candidate !== null && candidate.classId !== prediction.classId
-        ),
-        treatment: getTreatment(prediction.classId),
-        isLowConfidence,
-        isAmbiguous: selected.ambiguous,
-        source: "gallery",
-      });
+      const asset = pickerResult.assets[0];
+      await analyzeAndOpenResult(asset.uri, asset.width, asset.height, "gallery");
     } catch (error) {
       console.error("Gallery scan failed:", error);
       setErrorMessage("This image could not be analyzed. Choose a clear, well-lit photo of one leaf.");
@@ -172,10 +186,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
     }
   }, [
     busy,
-    diseaseModel,
-    getPredictionFromImageUri,
-    pestModel,
-    saveAndOpenResult,
+    analyzeAndOpenResult,
   ]);
 
   if (!hasPermission) {
@@ -254,7 +265,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
           <Text style={styles.galleryButtonText}>Gallery</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.captureButton} onPress={handleCapture} disabled={busy || !livePrediction}>
+        <TouchableOpacity style={styles.captureButton} onPress={handleCapture} disabled={busy}>
           {busy ? <ActivityIndicator color="#FFFFFF" /> : <View style={styles.captureInner} />}
         </TouchableOpacity>
 

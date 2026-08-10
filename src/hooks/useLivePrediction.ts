@@ -6,8 +6,12 @@ import type { TensorflowModel } from "react-native-fast-tflite";
 import type { Prediction, ScanMode } from "@/types";
 import { diseaseClassNames, pestClassNames } from "./useTFLiteModels";
 import { predictionFromOutputs } from "@/lib/prediction";
-
-const MODEL_INPUT_SIZE = 224;
+import {
+  hasExpectedModelInput,
+  MODEL_INPUT_HEIGHT,
+  MODEL_INPUT_WIDTH,
+  rgbBytesToModelInput,
+} from "@/lib/modelInput";
 
 export function useLivePrediction(
   diseaseModel: TensorflowModel | undefined,
@@ -22,12 +26,12 @@ export function useLivePrediction(
 
   const runModel = (
     model: TensorflowModel | undefined,
-    input: Uint8Array,
+    input: Float32Array,
     classNames: string[],
     mode: ScanMode
   ): Prediction | null => {
     "worklet";
-    if (model == null || classNames.length === 0) return null;
+    if (model == null || classNames.length === 0 || !hasExpectedModelInput(model)) return null;
     return predictionFromOutputs(model.runSync([input]), classNames, mode);
   };
 
@@ -35,14 +39,15 @@ export function useLivePrediction(
     (frame) => {
       "worklet";
 
-      const resized = resize(frame, {
-        scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+      const rgb = resize(frame, {
+        scale: { width: MODEL_INPUT_WIDTH, height: MODEL_INPUT_HEIGHT },
         pixelFormat: "rgb",
         dataType: "uint8",
       });
+      const input = rgbBytesToModelInput(rgb);
 
-      const diseasePred = runModel(diseaseModel, resized, diseaseClassNames, "disease");
-      const pestPred = runModel(pestModel, resized, pestClassNames, "pest");
+      const diseasePred = runModel(diseaseModel, input, diseaseClassNames, "disease");
+      const pestPred = runModel(pestModel, input, pestClassNames, "pest");
 
       const best =
         diseasePred && pestPred
