@@ -6,9 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "backgroundColor": "#F4F7F1"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -25,18 +22,21 @@
       "permissions": [
         "android.permission.CAMERA"
       ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#F4F7F1"
       }
     },
     "plugins": [
-      "expo-camera",
       "expo-image-picker",
       [
-        "react-native-vision-camera",
+        "expo-splash-screen",
         {
-          "cameraPermissionText": "LeafScan needs camera access to scan crops.",
-          "enableCodeScanner": false
+          "backgroundColor": "#F4F7F1",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160
         }
       ]
     ],

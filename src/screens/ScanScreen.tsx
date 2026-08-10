@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -7,13 +7,17 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Camera, useCameraDevice, useCameraPermission } from "react-native-vision-camera";
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  usePhotoOutput,
+} from "react-native-vision-camera";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
+import { File } from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 import base64ArrayBuffer from "base64-arraybuffer";
 import { useDiseaseModel, diseaseClassNames } from "@/hooks/useTFLiteModels";
-import { useLivePrediction } from "@/hooks/useLivePrediction";
 import { getTreatment } from "@/data/treatments";
 import { ScanResult } from "@/types";
 import { useScanHistory } from "@/hooks/useScanHistory";
@@ -29,12 +33,17 @@ import {
 export function ScanScreen({ navigation }: { navigation: any }) {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
-  const cameraRef = useRef<Camera>(null);
+  const photoOutput = usePhotoOutput({
+    containerFormat: "jpeg",
+    quality: 0.9,
+    qualityPrioritization: "balanced",
+  });
+  const cameraOutputs = useMemo(() => [photoOutput], [photoOutput]);
 
   const diseaseModel = useDiseaseModel();
-  const { frameProcessor, livePrediction } = useLivePrediction(diseaseModel.model);
 
   const [busy, setBusy] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { addScan } = useScanHistory();
 
@@ -43,7 +52,6 @@ export function ScanScreen({ navigation }: { navigation: any }) {
   }, [hasPermission, requestPermission]);
 
   const modelsReady = diseaseModel.state === "loaded";
-  const liveIsUncertain = livePrediction ? isPredictionUncertain(livePrediction) : true;
 
   const saveAndOpenResult = useCallback(
     async (result: ScanResult) => {
@@ -121,7 +129,12 @@ export function ScanScreen({ navigation }: { navigation: any }) {
         });
       } finally {
         if (manipulatedUri) {
-          await FileSystem.deleteAsync(manipulatedUri, { idempotent: true }).catch(() => undefined);
+          try {
+            const temporaryFile = new File(manipulatedUri);
+            if (temporaryFile.exists) temporaryFile.delete();
+          } catch {
+            // Temporary inference images are also eligible for OS cache cleanup.
+          }
         }
       }
     },
@@ -129,21 +142,24 @@ export function ScanScreen({ navigation }: { navigation: any }) {
   );
 
   const handleCapture = useCallback(async () => {
-    if (!cameraRef.current || busy) return;
+    if (!cameraReady || busy) return;
 
     setBusy(true);
     setErrorMessage(null);
+    let photo: Awaited<ReturnType<typeof photoOutput.capturePhoto>> | undefined;
     try {
-      const photo = await cameraRef.current.takePhoto({ flash: "off" });
-      const imageUri = photo.path.startsWith("file://") ? photo.path : `file://${photo.path}`;
+      photo = await photoOutput.capturePhoto({ flashMode: "off" }, {});
+      const photoPath = await photo.saveToTemporaryFileAsync();
+      const imageUri = photoPath.startsWith("file://") ? photoPath : `file://${photoPath}`;
       await analyzeAndOpenResult(imageUri, photo.width, photo.height, "camera");
     } catch (error) {
       console.error("Camera capture failed:", error);
       setErrorMessage("We could not capture this scan. Try again in better light.");
     } finally {
+      photo?.dispose();
       setBusy(false);
     }
-  }, [analyzeAndOpenResult, busy]);
+  }, [analyzeAndOpenResult, busy, cameraReady, photoOutput]);
 
   const handlePickFromGallery = useCallback(async () => {
     if (busy) return;
@@ -155,7 +171,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
     }
 
     const pickerResult = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: "images",
       quality: 0.9,
       allowsEditing: false,
     });
@@ -216,34 +232,23 @@ export function ScanScreen({ navigation }: { navigation: any }) {
   return (
     <View style={styles.container}>
       <Camera
-        ref={cameraRef}
         style={StyleSheet.absoluteFill}
         device={device}
         isActive={!busy}
-        photo={true}
-        frameProcessor={frameProcessor}
+        outputs={cameraOutputs}
+        onStarted={() => setCameraReady(true)}
+        onStopped={() => setCameraReady(false)}
+        onError={(error) => {
+          console.error("Camera session failed:", error);
+          setCameraReady(false);
+          setErrorMessage("The camera could not start. You can still choose a photo from the gallery.");
+        }}
       />
 
       <View style={styles.topHint}>
         <Text style={styles.topHintTitle}>Frame one affected leaf</Text>
         <Text style={styles.topHintText}>Use daylight and keep the leaf in focus</Text>
       </View>
-
-      {livePrediction && (
-        <View style={styles.overlay}>
-          <Text style={styles.overlayEyebrow}>Live estimate</Text>
-          <Text style={styles.overlayLabel}>
-            {liveIsUncertain
-              ? "No reliable live match"
-              : `Possible ${humanizeLabel(livePrediction.label)}`}
-          </Text>
-          <Text style={styles.overlayConfidence}>
-            {liveIsUncertain
-              ? "Try steadier framing and even daylight"
-              : `${Math.round(livePrediction.confidence * 100)}% model score`}
-          </Text>
-        </View>
-      )}
 
       {errorMessage && (
         <View style={styles.errorBanner}>
@@ -260,7 +265,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
           <Text style={styles.galleryButtonText}>Gallery</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.captureButton} onPress={handleCapture} disabled={busy}>
+        <TouchableOpacity style={styles.captureButton} onPress={handleCapture} disabled={busy || !cameraReady}>
           {busy ? <ActivityIndicator color="#FFFFFF" /> : <View style={styles.captureInner} />}
         </TouchableOpacity>
 
@@ -289,10 +294,6 @@ const styles = StyleSheet.create({
   topHint: { position: "absolute", top: 48, alignSelf: "center", alignItems: "center" },
   topHintTitle: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
   topHintText: { color: "#D7E4CE", fontSize: 12, marginTop: 4 },
-  overlay: { position: "absolute", top: 104, alignSelf: "center", alignItems: "center", backgroundColor: "rgba(15,25,12,0.78)", paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16 },
-  overlayEyebrow: { color: "#BBD7AD", fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 },
-  overlayLabel: { color: "#FFFFFF", fontSize: 17, fontWeight: "800", marginTop: 2, textAlign: "center" },
-  overlayConfidence: { color: "#D7E4CE", fontSize: 12, marginTop: 3 },
   errorBanner: { position: "absolute", top: 170, left: 18, right: 18, backgroundColor: "#FFF3EC", borderRadius: 14, padding: 13, flexDirection: "row", alignItems: "center", gap: 10 },
   errorText: { color: "#873B25", flex: 1, lineHeight: 19 },
   dismissText: { color: "#873B25", fontWeight: "800" },

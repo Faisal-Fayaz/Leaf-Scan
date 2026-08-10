@@ -10,10 +10,7 @@ module.exports = function (api) {
           '@': './src',
         },
         extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
-      },
-      ],
-      ['react-native-worklets-core/plugin'],
-      'react-native-reanimated/plugin',
+      }],
     ],
   };
 };
