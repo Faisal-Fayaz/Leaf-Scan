@@ -24,7 +24,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import { File } from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
-import base64ArrayBuffer from "base64-arraybuffer";
+import { decode as decodeBase64ArrayBuffer } from "base64-arraybuffer";
 import { AppButton } from "@/components/AppButton";
 import { StatusPill } from "@/components/StatusPill";
 import { useDiseaseModel, diseaseClassNames } from "@/hooks/useTFLiteModels";
@@ -129,7 +129,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
         manipulatedUri = manipulated.uri;
         if (!manipulated.base64) throw new Error("Image preprocessing returned no data");
 
-        const imageBuffer = base64ArrayBuffer.decode(manipulated.base64);
+        const imageBuffer = decodeBase64ArrayBuffer(manipulated.base64);
         const modelInput = jpegToModelInput(imageBuffer);
         const prediction = runModelPrediction(
           diseaseModel.model,

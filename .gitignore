@@ -7,6 +7,7 @@ node_modules/
 .expo/
 dist/
 web-build/
+coverage/
 
 # Native
 .kotlin/
@@ -24,13 +25,23 @@ web-build/
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.log
 
 # macOS
 .DS_Store
 *.pem
 
 # local env files
+.env
+.env.*
+!.env.example
 .env*.local
+
+# editor and local backups
+.idea/
+.vscode/
+*.backup
+*.bak
 
 # typescript
 *.tsbuildinfo

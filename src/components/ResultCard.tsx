@@ -16,7 +16,7 @@ const SEVERITY_COLORS: Record<Severity, string> = {
 
 export function ResultCard({ result }: { result: ScanResult }) {
   const { language, t } = useI18n();
-  const { imageUri, topPrediction, treatment, isLowConfidence, isAmbiguous } = result;
+  const { imageUri, topPrediction, treatment, isAmbiguous } = result;
   const safetyStatus = getResultSafetyStatus(result);
   const canShowGuidance = safetyStatus === "possible-match" && treatment !== null;
   const possibleName = treatment?.displayName ?? humanizeLabel(topPrediction.label);

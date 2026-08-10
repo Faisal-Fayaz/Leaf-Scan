@@ -5,26 +5,42 @@ import {
 } from "react-native-fast-tflite";
 import diseaseClasses from "@/data/disease_class_names.json";
 
+// Metro needs a static require call to turn this native model into an asset ID.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const diseaseModelSource = require("../../assets/models/disease_model.tflite");
 
+const LOADING_MODEL: TensorflowPlugin = {
+  model: undefined,
+  state: "loading",
+};
+
+type KeyedModelState = {
+  retryKey: number;
+  modelState: TensorflowPlugin;
+};
+
 export function useDiseaseModel(retryKey = 0): TensorflowPlugin {
-  const [state, setState] = useState<TensorflowPlugin>({
-    model: undefined,
-    state: "loading",
+  const [state, setState] = useState<KeyedModelState>({
+    retryKey,
+    modelState: LOADING_MODEL,
   });
 
   useEffect(() => {
     let active = true;
-    setState({ model: undefined, state: "loading" });
     void loadTensorflowModel(diseaseModelSource, [])
       .then((model) => {
-        if (active) setState({ model, state: "loaded" });
+        if (active) {
+          setState({ retryKey, modelState: { model, state: "loaded" } });
+        }
       })
       .catch((error: unknown) => {
         if (!active) return;
         const modelError = error instanceof Error ? error : new Error(String(error));
         console.error("Failed to load the disease model:", modelError);
-        setState({ model: undefined, state: "error", error: modelError });
+        setState({
+          retryKey,
+          modelState: { model: undefined, state: "error", error: modelError },
+        });
       });
 
     return () => {
@@ -32,7 +48,7 @@ export function useDiseaseModel(retryKey = 0): TensorflowPlugin {
     };
   }, [retryKey]);
 
-  return state;
+  return state.retryKey === retryKey ? state.modelState : LOADING_MODEL;
 }
 
 export const diseaseClassNames: string[] = diseaseClasses;

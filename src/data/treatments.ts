@@ -13,12 +13,12 @@ const SAFE_FIRST_STEPS = [
   "Recheck the plant in 3–5 days and confirm the diagnosis with a local agricultural extension professional before applying any product.",
 ];
 
-const GUIDANCE_BY_PATTERN: Array<{
+const GUIDANCE_BY_PATTERN: {
   pattern: RegExp;
   description: string;
   organicTreatment?: string[];
   severity?: TreatmentInfo["severity"];
-}> = [
+}[] = [
   {
     pattern: /healthy/i,
     description:
