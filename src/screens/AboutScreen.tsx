@@ -1,66 +1,180 @@
-import React from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { type ComponentProps } from "react";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { StatusPill } from "@/components/StatusPill";
 import diseaseClassNames from "@/data/disease_class_names.json";
+import { useI18n, type AppLanguage } from "@/i18n";
+import { colors, radii, shadows, spacing } from "@/theme";
 
 export default function AboutScreen() {
+  const { language, setLanguage, t } = useI18n();
+
+  const chooseLanguage = (next: AppLanguage) => {
+    if (next === language) return;
+    if (Platform.OS !== "web") void Haptics.selectionAsync();
+    setLanguage(next);
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.kicker}>LEAFSCAN</Text>
-      <Text style={styles.title}>A careful second opinion for the field</Text>
-      <Text style={styles.lead}>
-        LeafScan runs its current models on-device, so a scan does not require an internet connection or upload your photos.
-      </Text>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <LinearGradient colors={[colors.primaryDark, "#315D3D"]} style={styles.hero}>
+          <View style={styles.heroGlow} />
+          <View style={styles.heroTop}>
+            <StatusPill label={t("about.kicker")} icon="leaf" tone="dark" />
+            <View style={styles.heroMark}>
+              <Ionicons name="scan-outline" size={25} color={colors.primaryDark} />
+            </View>
+          </View>
+          <Text style={styles.heroTitle}>{t("about.title")}</Text>
+          <Text style={styles.heroLead}>{t("about.lead")}</Text>
 
-      <InfoCard title="What this version can identify">
-        <Text style={styles.text}>
-          The active disease model has {diseaseClassNames.length} PlantVillage-style classes. Pest scanning is disabled because the available insect model has unverified numeric labels; LeafScan will not turn those into a pest name or treatment.
-        </Text>
-      </InfoCard>
+          <View style={styles.stats}>
+            <Stat icon="layers-outline" label={t("about.statClasses", { count: diseaseClassNames.length })} />
+            <Stat icon="cloud-offline-outline" label={t("about.statOffline")} />
+            <Stat icon="lock-closed-outline" label={t("about.statPrivate")} />
+          </View>
+        </LinearGradient>
 
-      <InfoCard title="Use it safely">
-        <Text style={styles.text}>
-          A photo classifier can confuse disease, pests, nutrient stress, weather damage, and normal variation. Use clear photos of one leaf, take a second scan when the score is low, and confirm serious or spreading problems with a local extension officer or agronomist.
-        </Text>
-      </InfoCard>
+        <View style={styles.languageCard}>
+          <View style={styles.cardIcon}>
+            <Ionicons name="language-outline" size={22} color={colors.primary} />
+          </View>
+          <View style={styles.languageCopy}>
+            <Text style={styles.cardTitle}>{t("about.languageTitle")}</Text>
+            <Text style={styles.cardText}>{t("about.languageBody")}</Text>
+          </View>
+          <View style={styles.segmented}>
+            <LanguageOption
+              label={t("about.english")}
+              active={language === "en"}
+              onPress={() => chooseLanguage("en")}
+            />
+            <LanguageOption
+              label={t("about.hindi")}
+              active={language === "hi"}
+              onPress={() => chooseLanguage("hi")}
+            />
+          </View>
+        </View>
 
-      <InfoCard title="Why it is not yet an any-plant expert">
-        <Text style={styles.text}>
-          No single model can reliably identify every plant species and disease from one image. Broad coverage requires region-specific datasets, verified labels, calibration on field images, and ongoing evaluation. Until those are added, LeafScan intentionally refuses to present unsupported results as facts.
-        </Text>
-      </InfoCard>
+        <InfoCard icon="layers-outline" title={t("about.modelTitle")}>
+          {t("about.modelBody", { count: diseaseClassNames.length })}
+        </InfoCard>
+        <InfoCard icon="shield-checkmark-outline" title={t("about.safeTitle")} tone="warning">
+          {t("about.safeBody")}
+        </InfoCard>
+        <InfoCard icon="earth-outline" title={t("about.scopeTitle")}>
+          {t("about.scopeBody")}
+        </InfoCard>
+        <InfoCard icon="lock-closed-outline" title={t("about.privacyTitle")}>
+          {t("about.privacyBody")}
+        </InfoCard>
 
-      <InfoCard title="Privacy">
-        <Text style={styles.text}>
-          Images and scan summaries are stored locally by this app. You can clear scan history from the History tab. No server account is required.
-        </Text>
-      </InfoCard>
+        {language === "hi" && (
+          <View style={styles.languageNote}>
+            <Ionicons name="information-circle-outline" size={21} color={colors.warning} />
+            <Text style={styles.languageNoteText}>{t("about.guidanceEnglish")}</Text>
+          </View>
+        )}
 
-      <View style={styles.footer}>
-        <Text style={styles.version}>LeafScan v1.0.0</Text>
-        <Text style={styles.disclaimer}>AI-assisted decision support • not a pesticide label or professional diagnosis</Text>
-      </View>
-    </ScrollView>
+        <View style={styles.footer}>
+          <View style={styles.footerMark}>
+            <Ionicons name="leaf" size={20} color={colors.white} />
+          </View>
+          <Text style={styles.version}>{t("about.version")}</Text>
+          <Text style={styles.disclaimer}>{t("about.disclaimer")}</Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
+function Stat({ icon, label }: { icon: ComponentProps<typeof Ionicons>["name"]; label: string }) {
   return (
-    <View style={styles.card}>
-      <Text style={styles.heading}>{title}</Text>
-      {children}
+    <View style={styles.stat}>
+      <Ionicons name={icon} size={17} color={colors.lime} />
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function LanguageOption({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.languageOption,
+        active ? styles.languageOptionActive : undefined,
+        pressed ? styles.pressed : undefined,
+      ]}
+    >
+      {active && <Ionicons name="checkmark-circle" size={17} color={colors.primary} />}
+      <Text style={[styles.languageLabel, active ? styles.languageLabelActive : undefined]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function InfoCard({
+  icon,
+  title,
+  tone = "green",
+  children,
+}: {
+  icon: ComponentProps<typeof Ionicons>["name"];
+  title: string;
+  tone?: "green" | "warning";
+  children: string;
+}) {
+  const iconColor = tone === "warning" ? colors.warning : colors.primary;
+  const iconBackground = tone === "warning" ? colors.warningSurface : colors.primaryLight;
+  return (
+    <View style={styles.infoCard}>
+      <View style={[styles.cardIcon, { backgroundColor: iconBackground }]}>
+        <Ionicons name={icon} size={22} color={iconColor} />
+      </View>
+      <View style={styles.infoBody}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        <Text style={styles.cardText}>{children}</Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, padding: 22, backgroundColor: "#F4F7F1" },
-  kicker: { color: "#4C7A3D", fontSize: 12, fontWeight: "900", letterSpacing: 2 },
-  title: { fontSize: 30, lineHeight: 35, fontWeight: "900", color: "#1F2A1A", marginTop: 8 },
-  lead: { fontSize: 16, lineHeight: 24, color: "#52624D", marginTop: 14, marginBottom: 8 },
-  card: { backgroundColor: "#FFFFFF", borderRadius: 16, padding: 16, marginTop: 14 },
-  heading: { fontSize: 17, fontWeight: "800", color: "#2D3C28", marginBottom: 7 },
-  text: { fontSize: 14, lineHeight: 21, color: "#52624D" },
-  footer: { alignItems: "center", marginTop: 28, paddingBottom: 10 },
-  version: { color: "#6B7A63", fontWeight: "800" },
-  disclaimer: { color: "#7B8278", fontSize: 11, textAlign: "center", marginTop: 6 },
+  safeArea: { flex: 1, backgroundColor: colors.canvas },
+  content: { padding: spacing.xl, paddingBottom: spacing.xxxl },
+  hero: { borderRadius: 28, padding: spacing.xxl, overflow: "hidden", ...shadows.floating },
+  heroGlow: { position: "absolute", width: 220, height: 220, borderRadius: 110, right: -90, top: -90, backgroundColor: "rgba(154,203,119,0.16)" },
+  heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  heroMark: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.lime },
+  heroTitle: { color: colors.white, fontSize: 31, lineHeight: 37, fontWeight: "900", marginTop: spacing.xxl, maxWidth: 380 },
+  heroLead: { color: "#DCE9D8", fontSize: 15, lineHeight: 23, marginTop: spacing.md, maxWidth: 520 },
+  stats: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xxl },
+  stat: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: "rgba(255,255,255,0.1)" },
+  statLabel: { color: colors.white, fontSize: 11, fontWeight: "800" },
+  languageCard: { marginTop: spacing.xl, backgroundColor: colors.surface, borderRadius: radii.xl, padding: spacing.lg, borderWidth: 1, borderColor: colors.border, ...shadows.card },
+  languageCopy: { marginTop: spacing.md },
+  segmented: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg, backgroundColor: colors.neutralSurface, borderRadius: radii.md, padding: 4 },
+  languageOption: { flex: 1, minHeight: 46, borderRadius: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
+  languageOptionActive: { backgroundColor: colors.surface, ...shadows.card },
+  languageLabel: { color: colors.muted, fontSize: 14, fontWeight: "800" },
+  languageLabelActive: { color: colors.primaryDark },
+  pressed: { opacity: 0.76 },
+  infoCard: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md, backgroundColor: colors.surface, borderRadius: radii.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.border, marginTop: spacing.md, ...shadows.card },
+  cardIcon: { width: 46, height: 46, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight },
+  infoBody: { flex: 1 },
+  cardTitle: { color: colors.ink, fontSize: 17, lineHeight: 22, fontWeight: "900" },
+  cardText: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 5 },
+  languageNote: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, backgroundColor: colors.warningSurface, borderRadius: radii.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.warningBorder, marginTop: spacing.md },
+  languageNoteText: { flex: 1, color: colors.warning, fontSize: 13, lineHeight: 19 },
+  footer: { alignItems: "center", marginTop: spacing.xxxl, paddingBottom: spacing.md },
+  footerMark: { width: 42, height: 42, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary },
+  version: { color: colors.inkSoft, fontWeight: "900", marginTop: spacing.md },
+  disclaimer: { color: colors.subtle, fontSize: 11, lineHeight: 16, textAlign: "center", marginTop: 5, maxWidth: 340 },
 });
