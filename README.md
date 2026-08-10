@@ -10,8 +10,12 @@ The app rejects low-confidence or close results, records them as uncertain, and 
 
 ## Development setup
 
+LeafScan targets Expo SDK 57, React Native 0.86, and Node.js 22.13 or newer.
+
 ~~~bash
-npm install
+nvm use
+npm ci
+npm test
 npm run typecheck
 npm run doctor
 npm start
@@ -25,6 +29,8 @@ npm run android
 # iOS requires macOS/Xcode:
 npm run ios
 ~~~
+
+The browser export intentionally shows a mobile handoff rather than loading the native camera and TensorFlow Lite runtime. This keeps the web build usable without claiming that browser scans are supported.
 
 For an installable Android preview build:
 
