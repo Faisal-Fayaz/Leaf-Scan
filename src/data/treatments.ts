@@ -32,7 +32,7 @@ const GUIDANCE_BY_PATTERN: Array<{
   {
     pattern: /powdery_mildew/i,
     description:
-      "The model recognized a powdery-mildew pattern. These fungi are often encouraged by humid, poorly ventilated growth and can spread quickly.",
+      "The closest supported visual pattern was powdery mildew. These fungi are often encouraged by humid, poorly ventilated growth and can spread quickly.",
     organicTreatment: [
       "Prune crowded growth to improve air movement without removing more than one-third of the plant at once.",
       "Remove heavily infected leaves and keep the canopy dry overnight.",
@@ -43,7 +43,7 @@ const GUIDANCE_BY_PATTERN: Array<{
   {
     pattern: /bacterial_spot/i,
     description:
-      "The model recognized a bacterial-spot pattern. Splashing water and contaminated tools can spread bacterial leaf spots.",
+      "The closest supported visual pattern was bacterial spot. Splashing water and contaminated tools can spread bacterial leaf spots.",
     organicTreatment: [
       "Avoid overhead irrigation and do not handle plants while foliage is wet.",
       "Sanitize pruning tools between plants and remove badly affected leaves.",
@@ -54,7 +54,7 @@ const GUIDANCE_BY_PATTERN: Array<{
   {
     pattern: /late_blight|early_blight|leaf_blight|leaf_spot|target_spot|septoria/i,
     description:
-      "The model recognized a fungal leaf-blight or leaf-spot pattern. Confirmation is important because several conditions look similar in photos.",
+      "The closest supported visual pattern was a fungal leaf blight or leaf spot. Confirmation is important because several conditions look similar in photos.",
     organicTreatment: [
       "Remove affected lower leaves and fallen debris to reduce sources of new infection.",
       "Stake or space plants to improve airflow and avoid wetting the leaves.",
@@ -65,7 +65,7 @@ const GUIDANCE_BY_PATTERN: Array<{
   {
     pattern: /black_rot|apple_scab|cedar_apple_rust|esca/i,
     description:
-      "The model recognized a fruit-tree or grape fungal-disease pattern. Pruning, sanitation, and a locally approved disease-management plan are important.",
+      "The closest supported visual pattern was a fruit-tree or grape fungal disease. Pruning, sanitation, and a locally approved disease-management plan are important.",
     organicTreatment: [
       "Remove mummified fruit and infected leaves from the tree floor.",
       "Prune dead or badly affected wood during the appropriate dormant-season window for the crop.",
@@ -76,7 +76,7 @@ const GUIDANCE_BY_PATTERN: Array<{
   {
     pattern: /rust/i,
     description:
-      "The model recognized a rust-like pattern. Rust symptoms can overlap with nutrient stress and other leaf diseases, so confirm before treating.",
+      "The closest supported visual pattern was rust-like. Rust symptoms can overlap with nutrient stress and other leaf diseases, so confirm before treating.",
     organicTreatment: [
       "Remove and dispose of severely affected leaves and keep volunteer host plants under control.",
       "Increase spacing and airflow where possible.",
@@ -87,7 +87,7 @@ const GUIDANCE_BY_PATTERN: Array<{
   {
     pattern: /mosaic|yellow_leaf_curl|greening/i,
     description:
-      "The model recognized a virus-like pattern. Viruses cannot be cured by a spray; vector control and removal of infected plants may be necessary.",
+      "The closest supported visual pattern was virus-like. Viruses cannot be cured by a spray; vector control and removal of infected plants may be necessary after local confirmation.",
     organicTreatment: [
       "Mark the plant and compare symptoms on new growth before removing it.",
       "Control suspected insect vectors using locally approved integrated-pest-management methods.",
@@ -99,7 +99,7 @@ const GUIDANCE_BY_PATTERN: Array<{
   {
     pattern: /spider_mites/i,
     description:
-      "The model recognized a two-spotted-spider-mite pattern. Mites often increase under hot, dry conditions and can be confused with nutrient stress.",
+      "The closest supported visual pattern was two-spotted spider mite. Mites often increase under hot, dry conditions and can be confused with nutrient stress.",
     organicTreatment: [
       "Inspect leaf undersides and nearby plants; use a strong but gentle water spray where the crop tolerates it.",
       "Reduce dust and heat stress and protect beneficial predators.",
@@ -131,7 +131,7 @@ function makeTreatment(classId: string): TreatmentInfo {
     crop,
     description:
       matched?.description ??
-      "The model recognized a pattern in a supported crop. Several plant problems look alike in a single photograph, so confirm the diagnosis locally before taking action.",
+      "The image's closest supported visual pattern is shown here. Several plant problems look alike in a single photograph, so confirm it locally before taking action.",
     organicTreatment: matched?.organicTreatment ?? SAFE_FIRST_STEPS,
     chemicalTreatment: [],
     severity: matched?.severity ?? "moderate",

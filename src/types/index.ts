@@ -3,7 +3,7 @@ export type ScanMode = "disease" | "pest";
 export interface Prediction {
   classId: string;
   label: string;
-  confidence: number; // calibrated/normalized 0-1 estimate
+  confidence: number; // normalized 0-1 model score; not a calibrated probability
   margin?: number; // distance from the model's second-best class
   mode: ScanMode;
 }
@@ -30,7 +30,7 @@ export interface ScanResult {
   source?: "camera" | "gallery";
 }
 
-// Conservative threshold: a softmax score is not an agricultural probability,
-// so the app must not present a low-score result as definitive.
+// Conservative rejection thresholds. A softmax score is not an agricultural
+// probability, so every accepted result remains a possible match to confirm.
 export const LOW_CONFIDENCE_THRESHOLD = 0.6;
 export const AMBIGUOUS_MARGIN_THRESHOLD = 0.08;

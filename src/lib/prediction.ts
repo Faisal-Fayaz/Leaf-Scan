@@ -77,24 +77,3 @@ export function predictionFromOutputs(
     mode,
   };
 }
-
-export function selectBestPrediction(predictions: Array<Prediction | null>): {
-  prediction: Prediction | null;
-  ambiguous: boolean;
-} {
-  const valid = predictions.filter((prediction): prediction is Prediction => prediction !== null);
-  if (valid.length === 0) return { prediction: null, ambiguous: true };
-  if (valid.length === 1) return { prediction: valid[0], ambiguous: false };
-
-  const sorted = [...valid].sort((a, b) => b.confidence - a.confidence);
-  const [winner, runnerUp] = sorted;
-  const crossModelMargin = winner.confidence - runnerUp.confidence;
-
-  return {
-    prediction: winner,
-    // Disease and pest models are trained on different datasets. Requiring a
-    // margin prevents two similarly confident models from producing a false
-    // definitive answer.
-    ambiguous: crossModelMargin < 0.08,
-  };
-}

@@ -1,7 +1,6 @@
 import React from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import diseaseClassNames from "@/data/disease_class_names.json";
-import pestClassNames from "@/data/pest_class_names.json";
 
 export default function AboutScreen() {
   return (
@@ -14,7 +13,7 @@ export default function AboutScreen() {
 
       <InfoCard title="What this version can identify">
         <Text style={styles.text}>
-          The bundled disease model has {diseaseClassNames.length} PlantVillage-style classes. The pest model has {pestClassNames.length} IP102-style insect classes, but those pest labels are currently numeric and require local confirmation.
+          The active disease model has {diseaseClassNames.length} PlantVillage-style classes. Pest scanning is disabled because the available insect model has unverified numeric labels; LeafScan will not turn those into a pest name or treatment.
         </Text>
       </InfoCard>
 

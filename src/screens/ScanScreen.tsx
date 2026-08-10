@@ -12,16 +12,19 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 import base64ArrayBuffer from "base64-arraybuffer";
-import { useDiseaseModel, usePestModel, diseaseClassNames, pestClassNames } from "@/hooks/useTFLiteModels";
+import { useDiseaseModel, diseaseClassNames } from "@/hooks/useTFLiteModels";
 import { useLivePrediction } from "@/hooks/useLivePrediction";
 import { getTreatment } from "@/data/treatments";
-import { AMBIGUOUS_MARGIN_THRESHOLD, LOW_CONFIDENCE_THRESHOLD, ScanResult } from "@/types";
+import { ScanResult } from "@/types";
 import { useScanHistory } from "@/hooks/useScanHistory";
 import { jpegToModelInput, runModelPrediction } from "@/lib/imageInference";
-import { selectBestPrediction } from "@/lib/prediction";
 import { cropFromLabel, humanizeLabel } from "@/lib/labels";
 import { centeredSquareCrop } from "@/lib/imageGeometry";
-import type { Prediction } from "@/types";
+import {
+  getResultSafetyStatus,
+  hasAmbiguousMargin,
+  isPredictionUncertain,
+} from "@/lib/resultSafety";
 
 export function ScanScreen({ navigation }: { navigation: any }) {
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -29,11 +32,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
   const cameraRef = useRef<Camera>(null);
 
   const diseaseModel = useDiseaseModel();
-  const pestModel = usePestModel();
-  const { frameProcessor, livePrediction } = useLivePrediction(
-    diseaseModel.model,
-    pestModel.model
-  );
+  const { frameProcessor, livePrediction } = useLivePrediction(diseaseModel.model);
 
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -43,18 +42,25 @@ export function ScanScreen({ navigation }: { navigation: any }) {
     if (!hasPermission) void requestPermission();
   }, [hasPermission, requestPermission]);
 
-  const modelsReady = diseaseModel.state === "loaded" && pestModel.state === "loaded";
+  const modelsReady = diseaseModel.state === "loaded";
+  const liveIsUncertain = livePrediction ? isPredictionUncertain(livePrediction) : true;
 
   const saveAndOpenResult = useCallback(
     async (result: ScanResult) => {
+      const safetyStatus = getResultSafetyStatus(result);
+      const hasPossibleMatch = safetyStatus === "possible-match";
       await addScan({
-        diagnosis: humanizeLabel(result.topPrediction.label),
+        diagnosis: hasPossibleMatch
+          ? `Possible ${humanizeLabel(result.topPrediction.label)}`
+          : safetyStatus === "uncertain"
+            ? "Uncertain scan"
+            : "Unsupported scan",
         confidence: result.topPrediction.confidence,
-        type: result.topPrediction.mode,
+        type: hasPossibleMatch ? "disease" : "unknown",
         imageUri: result.imageUri,
-        crop: cropFromLabel(result.topPrediction.label),
+        crop: hasPossibleMatch ? cropFromLabel(result.topPrediction.label) : undefined,
         classId: result.topPrediction.classId,
-        isAmbiguous: result.isAmbiguous,
+        isAmbiguous: !hasPossibleMatch,
       });
       navigation.navigate("Result", { result });
     },
@@ -70,9 +76,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
     ) => {
       if (
         diseaseModel.state !== "loaded" ||
-        !diseaseModel.model ||
-        pestModel.state !== "loaded" ||
-        !pestModel.model
+        !diseaseModel.model
       ) {
         throw new Error("The offline models are not ready");
       }
@@ -96,38 +100,23 @@ export function ScanScreen({ navigation }: { navigation: any }) {
 
         const imageBuffer = base64ArrayBuffer.decode(manipulated.base64);
         const modelInput = jpegToModelInput(imageBuffer);
-        const diseasePrediction = runModelPrediction(
+        const prediction = runModelPrediction(
           diseaseModel.model,
           modelInput,
           diseaseClassNames,
           "disease"
         );
-        const pestPrediction = runModelPrediction(
-          pestModel.model,
-          modelInput,
-          pestClassNames,
-          "pest"
-        );
-        const selected = selectBestPrediction([diseasePrediction, pestPrediction]);
-        if (!selected.prediction) throw new Error("No model prediction was returned");
+        if (!prediction) throw new Error("No model prediction was returned");
 
-        const prediction = selected.prediction;
-        const isLowConfidence =
-          prediction.confidence < LOW_CONFIDENCE_THRESHOLD ||
-          (prediction.margin ?? 1) < AMBIGUOUS_MARGIN_THRESHOLD ||
-          selected.ambiguous;
-        const alternatives = [diseasePrediction, pestPrediction].filter(
-          (candidate): candidate is Prediction =>
-            candidate !== null && candidate !== prediction
-        );
+        const isLowConfidence = isPredictionUncertain(prediction);
 
         await saveAndOpenResult({
           imageUri,
           topPrediction: prediction,
-          alternativePredictions: alternatives,
+          alternativePredictions: [],
           treatment: getTreatment(prediction.classId),
           isLowConfidence,
-          isAmbiguous: selected.ambiguous,
+          isAmbiguous: hasAmbiguousMargin(prediction),
           source,
         });
       } finally {
@@ -136,7 +125,7 @@ export function ScanScreen({ navigation }: { navigation: any }) {
         }
       }
     },
-    [diseaseModel, pestModel, saveAndOpenResult]
+    [diseaseModel, saveAndOpenResult]
   );
 
   const handleCapture = useCallback(async () => {
@@ -243,9 +232,15 @@ export function ScanScreen({ navigation }: { navigation: any }) {
       {livePrediction && (
         <View style={styles.overlay}>
           <Text style={styles.overlayEyebrow}>Live estimate</Text>
-          <Text style={styles.overlayLabel}>{humanizeLabel(livePrediction.label)}</Text>
+          <Text style={styles.overlayLabel}>
+            {liveIsUncertain
+              ? "No reliable live match"
+              : `Possible ${humanizeLabel(livePrediction.label)}`}
+          </Text>
           <Text style={styles.overlayConfidence}>
-            {Math.round(livePrediction.confidence * 100)}% model score
+            {liveIsUncertain
+              ? "Try steadier framing and even daylight"
+              : `${Math.round(livePrediction.confidence * 100)}% model score`}
           </Text>
         </View>
       )}

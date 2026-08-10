@@ -1,12 +1,12 @@
 # LeafScan
 
-LeafScan is an offline React Native/Expo app for crop disease and insect-image triage. Camera frames and gallery images are processed on-device with TensorFlow Lite models.
+LeafScan is an offline React Native/Expo app for crop-disease image triage. Camera frames and gallery images are processed on-device with TensorFlow Lite.
 
 ## Current model scope
 
-The bundled disease model maps 38 PlantVillage-style classes. The bundled pest model maps 102 IP102-style classes, but its labels are numeric in this repository. This is not an “any plant” diagnostic system: unsupported species, nutrient stress, weather injury, mixed infections, and poor-quality images can all produce incorrect predictions.
+The active disease model maps 38 PlantVillage-style classes. An experimental 102-class pest model is retained in the repository, but the app deliberately does not run it because its labels are numeric and unverified. This is not an “any plant” diagnostic system: unsupported species, nutrient stress, weather injury, mixed infections, and poor-quality images can all produce incorrect predictions.
 
-The app intentionally shows a confirmation warning for low-confidence or ambiguous results. Treatment cards provide conservative first steps only; they do not replace a local agronomist or a pesticide label.
+The app rejects low-confidence or close results, records them as uncertain, and hides class-specific guidance. Accepted results are presented only as possible visual matches. Treatment cards provide conservative first steps; they do not replace a local agronomist or a pesticide label.
 
 ## Development setup
 
