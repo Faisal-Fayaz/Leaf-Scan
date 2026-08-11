@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { Asset } from "expo-asset";
 import {
   loadTensorflowModel,
   type TensorflowPlugin,
 } from "react-native-fast-tflite";
 import diseaseClasses from "@/data/disease_class_names.json";
+import { requireLocalModelUri } from "@/lib/modelAsset";
 
 // Metro needs a static require call to turn this native model into an asset ID.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -19,6 +21,12 @@ type KeyedModelState = {
   modelState: TensorflowPlugin;
 };
 
+async function loadBundledDiseaseModel() {
+  const [asset] = await Asset.loadAsync(diseaseModelSource);
+  const localUri = requireLocalModelUri(asset?.localUri);
+  return loadTensorflowModel({ url: localUri }, []);
+}
+
 export function useDiseaseModel(retryKey = 0): TensorflowPlugin {
   const [state, setState] = useState<KeyedModelState>({
     retryKey,
@@ -27,7 +35,7 @@ export function useDiseaseModel(retryKey = 0): TensorflowPlugin {
 
   useEffect(() => {
     let active = true;
-    void loadTensorflowModel(diseaseModelSource, [])
+    void loadBundledDiseaseModel()
       .then((model) => {
         if (active) {
           setState({ retryKey, modelState: { model, state: "loaded" } });
